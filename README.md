@@ -15,7 +15,7 @@
 
 ### 后端
 - **框架**：FastAPI 0.115.4
-- **深度学习**：PyTorch 2.6.0 + CUDA 11.8
+- **深度学习**：PyTorch 2.6.0 + CUDA 12.4
 - **模型库**：Transformers 4.46.3
 - **加速**：Accelerate 1.1.1
 - **服务器**：Uvicorn 0.32.0
@@ -29,14 +29,14 @@
 - **图表**：Recharts 3.5.0
 
 ### 部署
-- **容器化**：Docker + NVIDIA CUDA 11.8
+- **容器化**：Docker + NVIDIA CUDA 12.4
 - **模型管理**：HuggingFace Transformers
 
 ## 📋 前提条件
 
 - Python 3.9+
 - Node.js 18+ (用于前端开发)
-- CUDA 11.8+ (推荐，用于 GPU 加速)
+- CUDA 12.4+ (推荐，用于 GPU 加速)
 - Docker (可选，用于容器化部署)
 - HuggingFace 账号和访问令牌（需要申请 Llama 模型访问权限）
 
