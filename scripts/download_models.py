@@ -2,11 +2,11 @@
 下载推理模型和安全分类器脚本
 
 支持下载：
-- 推理模型：meta-llama/Llama-3.2-3B-Instruct
+- 推理模型：meta-llama/Llama-3.2-3B
 - 安全分类器：meta-llama/Llama-Guard-3-1B
 
 使用方法：
-    python scripts/download_models.py --model meta-llama/Llama-3.2-3B-Instruct --classifier meta-llama/Llama-Guard-3-1B
+    python scripts/download_models.py --model meta-llama/Llama-3.2-3B --classifier meta-llama/Llama-Guard-3-1B
     python scripts/download_models.py --all  # 下载默认的两个模型
 """
 
@@ -26,42 +26,17 @@ except ImportError:
 
 
 # 默认模型配置
-DEFAULT_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
+DEFAULT_MODEL = "meta-llama/Llama-3.2-3B"
 DEFAULT_CLASSIFIER = "meta-llama/Llama-Guard-3-1B"
-DEFAULT_MIRROR_ENDPOINT = "https://hf-mirror.com"
 
 
 def get_cache_dir() -> Path:
     """获取模型缓存目录"""
-    # 优先使用环境变量指定的本地模型路径（F盘）
-    local_model_path = os.getenv("LOCAL_MODEL_PATH")
-    if local_model_path:
-        return Path(local_model_path)
-    
     cache_dir = os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE")
     if cache_dir:
         return Path(cache_dir) / "models"
     # 默认使用用户目录下的缓存
     return Path.home() / ".cache" / "huggingface" / "models"
-
-
-def configure_endpoint(use_official: bool = False, mirror: Optional[str] = None) -> str:
-    """
-    配置 HuggingFace 下载端点，默认优先选择国内镜像。
-    """
-    if use_official:
-        target = mirror or os.getenv("HF_ENDPOINT") or "https://huggingface.co"
-    else:
-        target = (
-            mirror
-            or os.getenv("HF_MIRROR")
-            or os.getenv("HF_ENDPOINT")
-            or os.getenv("HUGGINGFACE_ENDPOINT")
-            or DEFAULT_MIRROR_ENDPOINT
-        )
-
-    os.environ["HF_ENDPOINT"] = target
-    return target
 
 
 def download_model(
@@ -105,9 +80,11 @@ def download_model(
     
     # 检查是否已存在
     if local_dir.exists() and any(local_dir.iterdir()):
-        print(f"✓ 模型目录已存在: {local_dir}")
-        print(f"  跳过下载，使用现有模型")
-        return local_dir
+        print(f"⚠ 模型目录已存在: {local_dir}")
+        response = input("是否重新下载？(y/N): ").strip().lower()
+        if response != 'y':
+            print(f"✓ 跳过下载，使用现有模型: {local_dir}")
+            return local_dir
     
     # 创建缓存目录
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -234,17 +211,7 @@ def main():
     parser.add_argument(
         "--output",
         type=str,
-        help="模型缓存目录（默认: $LOCAL_MODEL_PATH 或 $HF_HOME/models 或 ~/.cache/huggingface/models）",
-    )
-    parser.add_argument(
-        "--mirror",
-        type=str,
-        help=f"自定义镜像端点（默认优先使用 {DEFAULT_MIRROR_ENDPOINT}）",
-    )
-    parser.add_argument(
-        "--use-official",
-        action="store_true",
-        help="强制使用官方 huggingface.co 下载（不会自动切换镜像）",
+        help="模型缓存目录（默认: $HF_HOME/models 或 ~/.cache/huggingface/models）",
     )
     parser.add_argument(
         "--token",
@@ -270,9 +237,6 @@ def main():
     )
     
     args = parser.parse_args()
-
-    endpoint = configure_endpoint(use_official=args.use_official, mirror=args.mirror)
-    print(f"HuggingFace 端点: {endpoint}")
     
     # 确定要下载的模型
     models_to_download = []
@@ -335,5 +299,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
