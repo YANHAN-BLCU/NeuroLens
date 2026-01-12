@@ -197,18 +197,34 @@ class ModelManager:
                 if token_ids:
                     stop_token_ids.extend(token_ids)
 
+        # 确定是否使用采样
+        do_sample = temperature > 0
+        
+        # 构建生成参数字典，避免传递无效参数
+        generate_kwargs = {
+            "max_new_tokens": max_tokens,
+            "do_sample": do_sample,
+            "eos_token_id": tokenizer.eos_token_id,
+            "pad_token_id": tokenizer.pad_token_id,
+        }
+        
+        # 只在 do_sample=True 时添加采样相关参数，避免警告
+        if do_sample:
+            generate_kwargs["temperature"] = temperature
+            if top_p < 1.0:  # top_p=1.0 时不需要传递
+                generate_kwargs["top_p"] = top_p
+            if top_k > 0:
+                generate_kwargs["top_k"] = top_k
+        
+        # repetition_penalty 通常总是有效
+        if repetition_penalty != 1.0:
+            generate_kwargs["repetition_penalty"] = repetition_penalty
+
         start_time = time.time()
         with torch.inference_mode():
             output_ids = model.generate(
                 **inputs,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k if top_k > 0 else None,
-                repetition_penalty=repetition_penalty,
-                do_sample=temperature > 0,
-                eos_token_id=tokenizer.eos_token_id,
-                pad_token_id=tokenizer.pad_token_id,
+                **generate_kwargs,
             )
         latency_ms = (time.time() - start_time) * 1000
 

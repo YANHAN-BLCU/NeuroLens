@@ -1,0 +1,6 @@
+data_root: data/salad
+splits: ["analysis", "eval", "finetune"]
+attack_types: ["manual", "tap", "autodan", "gptfuzzer", "gcg"]
+cache_backend: "arrow"
+num_proc: 8
+

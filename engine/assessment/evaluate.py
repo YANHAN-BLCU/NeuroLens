@@ -4,7 +4,7 @@ Batch inference script for jailbreak assessment
 
 Usage:
     accelerate launch engine/assessment/evaluate.py \
-      --model meta-llama/Llama-3.2-3B \
+      --model meta-llama/Llama-3.2-3B-Instruct \
       --classifier meta-llama/Llama-Guard-3-1B \
       --salad_config configs/runtime/salad.yaml \
       --max_samples 1000 \
@@ -41,7 +41,7 @@ def find_local_model(model_id: str) -> Optional[Path]:
     Find local cached model path
     
     Args:
-        model_id: Model identifier (e.g., "meta-llama/Llama-3.2-3B")
+        model_id: Model identifier (e.g., "meta-llama/Llama-3.2-3B-Instruct")
     
     Returns:
         Local model path if found, None otherwise
@@ -54,7 +54,7 @@ def find_local_model(model_id: str) -> Optional[Path]:
         Path("/workspace/.cache/huggingface"),
     ]
     
-    # Convert model_id to cache format: meta-llama/Llama-3.2-3B -> models--meta-llama--Llama-3.2-3B
+    # Convert model_id to cache format: meta-llama/Llama-3.2-3B-Instruct -> models--meta-llama--Llama-3.2-3B-Instruct
     cache_name = model_id.replace("/", "--")
     
     for cache_dir in cache_dirs:
@@ -63,7 +63,7 @@ def find_local_model(model_id: str) -> Optional[Path]:
         
         cache_path = Path(cache_dir)
         
-        # Check in hub format: models--meta-llama--Llama-3.2-3B
+        # Check in hub format: models--meta-llama--Llama-3.2-3B-Instruct
         hub_path = cache_path / "hub" / f"models--{cache_name}"
         if hub_path.exists() and (hub_path / "snapshots").exists():
             # Find the latest snapshot
@@ -74,13 +74,13 @@ def find_local_model(model_id: str) -> Optional[Path]:
                     print(f"Found local model in hub cache: {latest_snapshot}")
                     return latest_snapshot
         
-        # Check in models format: models/meta-llama_Llama-3.2-3B
+        # Check in models format: models/meta-llama_Llama-3.2-3B-Instruct
         models_path = cache_path / "models" / model_id.replace("/", "_")
         if models_path.exists() and (models_path / "config.json").exists():
             print(f"Found local model in models cache: {models_path}")
             return models_path
         
-        # Check direct format: models--meta-llama--Llama-3.2-3B
+        # Check direct format: models--meta-llama--Llama-3.2-3B-Instruct
         direct_path = cache_path / f"models--{cache_name}"
         if direct_path.exists() and (direct_path / "snapshots").exists():
             snapshots = list((direct_path / "snapshots").iterdir())

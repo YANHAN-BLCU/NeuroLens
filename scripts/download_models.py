@@ -2,11 +2,11 @@
 下载推理模型和安全分类器脚本
 
 支持下载：
-- 推理模型：meta-llama/Llama-3.2-3B
+- 推理模型：meta-llama/Llama-3.2-3B-Instruct
 - 安全分类器：meta-llama/Llama-Guard-3-1B
 
 使用方法：
-    python scripts/download_models.py --model meta-llama/Llama-3.2-3B --classifier meta-llama/Llama-Guard-3-1B
+    python scripts/download_models.py --model meta-llama/Llama-3.2-3B-Instruct --classifier meta-llama/Llama-Guard-3-1B
     python scripts/download_models.py --all  # 下载默认的两个模型
 """
 
@@ -26,7 +26,7 @@ except ImportError:
 
 
 # 默认模型配置
-DEFAULT_MODEL = "meta-llama/Llama-3.2-3B"
+DEFAULT_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
 DEFAULT_CLASSIFIER = "meta-llama/Llama-Guard-3-1B"
 
 
