@@ -59,6 +59,15 @@ logs/
 # Data (if contains sensitive info)
 # data/
 
+# Model files (large files, should not be committed)
+*.safetensors
+*.pth
+*.bin
+*.pt
+hf_models/**/*.safetensors
+hf_models/**/*.pth
+hf_models/**/original/*.pth
+
 # Docker
 *.dockerignore
 
