@@ -6,6 +6,7 @@
 
 - 🤖 **智能推理**：基于 Meta Llama 3.2 模型进行文本生成和对话
 - 🛡️ **安全审核**：集成 Llama Guard 3 进行内容安全检测和过滤
+- 🧪 **SALAD 评估**：支持 SALAD-Bench 数据集评估，测试模型安全防护能力
 - 🎨 **现代化前端**：基于 React + TypeScript + Vite 构建的响应式 Web 界面
 - 🚀 **高性能后端**：FastAPI 提供 RESTful API 服务
 - 🐳 **Docker 支持**：完整的容器化部署方案
@@ -120,9 +121,12 @@ docker build -t neurobreak:latest -f docker/Dockerfile .
 docker run -it --gpus all \
   -p 8000:8000 \
   -v /path/to/models:/cache \
+  -v /path/to/workspace/hf_models:/workspace/hf_models \
   -e HF_TOKEN=your_token \
   neurobreak:latest
 ```
+
+**注意**：模型路径已更新为 `/workspace/hf_models`，请确保正确挂载模型目录。
 
 详细部署指南请参考 [DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)。
 
@@ -144,11 +148,18 @@ NeuroBreak-Reproduction/
 ├── docs/                  # 文档目录
 │   ├── QUICK_START.md     # 快速启动指南
 │   ├── DEPLOYMENT_GUIDE.md # 部署指南
+│   ├── SALAD_EVALUATION_GUIDE.md # SALAD 评估指南
+│   ├── SALAD_EVALUATION_ANALYSIS.md # SALAD 评估分析报告
 │   └── ...
 ├── scripts/               # 工具脚本
 │   ├── start_server.py    # 服务器启动脚本
 │   ├── download_models.py # 模型下载脚本
+│   ├── evaluate_salad_pipeline.py # SALAD 评估脚本
+│   ├── analyze_salad_results.py # SALAD 结果分析脚本
 │   └── ...
+├── hf_models/            # 模型文件目录
+│   ├── meta-llama_Llama-3.2-3B-Instruct/
+│   └── meta-llama_Llama-Guard-3-1B/
 ├── docker/                # Docker 配置
 │   └── Dockerfile
 ├── requirements.txt       # Python 依赖
@@ -208,13 +219,54 @@ Content-Type: application/json
 - [部署指南](docs/DEPLOYMENT_GUIDE.md) - 详细部署说明
 - [模型适配总结](docs/MODEL_ADAPTATION_SUMMARY.md) - 模型配置说明
 - [Docker 模型挂载](docs/DOCKER_MODEL_MOUNT.md) - Docker 模型管理
+- [SALAD 评估指南](docs/SALAD_EVALUATION_GUIDE.md) - SALAD-Bench 数据集评估指南
+- [SALAD 评估分析](docs/SALAD_EVALUATION_ANALYSIS.md) - SALAD 评估结果分析报告
 
 ## 🧪 测试
+
+### IO 测试
 
 运行 IO 测试：
 
 ```bash
 python scripts/run_io_tests.py
+```
+
+### SALAD-Bench 评估
+
+运行 SALAD-Bench 数据集评估（需要先下载数据集）：
+
+```bash
+# 在 Docker 容器内运行
+docker exec -it neurobreak-container /bin/bash
+cd /workspace
+python scripts/evaluate_salad_pipeline.py \
+    --data_dir /workspace/data/salad/raw \
+    --output /workspace/logs/salad_evaluation.jsonl \
+    --config base_set \
+    --max_samples 100
+```
+
+或使用 PowerShell 脚本（Windows）：
+
+```powershell
+.\scripts\run_salad_evaluation.ps1 -Config base_set -MaxSamples 100
+```
+
+**支持的配置**：
+- `base_set`: 基础数据集（21,318 样本）
+- `attack_enhanced_set`: 攻击增强集（5,000 样本）
+- `defense_enhanced_set`: 防御增强集（200 样本）
+- `mcq_set`: 多选题集（3,840 样本）
+
+详细说明请参考 [SALAD 评估指南](docs/SALAD_EVALUATION_GUIDE.md)。
+
+### 分析评估结果
+
+分析 SALAD 评估结果：
+
+```bash
+python scripts/analyze_salad_results.py
 ```
 
 ## 🔧 开发
@@ -241,10 +293,12 @@ python scripts/check_models.py
 ## ⚠️ 注意事项
 
 1. **模型访问权限**：需要申请 Meta Llama 和 Llama Guard 模型的访问权限
-2. **GPU 推荐**：虽然可以在 CPU 上运行，但 GPU 会显著提升性能
-3. **首次加载**：模型首次加载需要较长时间，这是正常现象
-4. **内存要求**：建议至少 16GB RAM，使用 GPU 时建议 8GB+ VRAM
-5. **网络要求**：首次运行需要从 HuggingFace 下载模型（约 10GB+）
+2. **模型路径**：模型默认路径为 `/workspace/hf_models`（容器内）或 `hf_models/`（本地）
+3. **GPU 推荐**：虽然可以在 CPU 上运行，但 GPU 会显著提升性能
+4. **首次加载**：模型首次加载需要较长时间，这是正常现象
+5. **内存要求**：建议至少 16GB RAM，使用 GPU 时建议 8GB+ VRAM
+6. **网络要求**：首次运行需要从 HuggingFace 下载模型（约 10GB+）
+7. **SALAD 评估**：运行 SALAD 评估前需要先下载 SALAD-Bench 数据集
 
 ## 🤝 贡献
 

@@ -119,28 +119,28 @@ python scripts/evaluate_salad_pipeline.py \
     --data_dir /workspace/data/salad/raw \
     --output /workspace/logs/base_set.jsonl \
     --config base_set \
-    --max_samples 50
+    --max_samples 10
 
 # attack_enhanced_set
 python scripts/evaluate_salad_pipeline.py \
     --data_dir /workspace/data/salad/raw \
     --output /workspace/logs/attack_enhanced_set.jsonl \
     --config attack_enhanced_set \
-    --max_samples 50
+    --max_samples 10
 
 # defense_enhanced_set
 python scripts/evaluate_salad_pipeline.py \
     --data_dir /workspace/data/salad/raw \
     --output /workspace/logs/defense_enhanced_set.jsonl \
     --config defense_enhanced_set \
-    --max_samples 50
+    --max_samples 10
 
 # mcq_set
 python scripts/evaluate_salad_pipeline.py \
     --data_dir /workspace/data/salad/raw \
     --output /workspace/logs/mcq_set.jsonl \
     --config mcq_set \
-    --max_samples 50
+    --max_samples 10
 ```
 
 ### 断点续传
