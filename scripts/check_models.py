@@ -9,12 +9,12 @@ from pathlib import Path
 # 模型路径配置
 LLM_LOCAL_PATH = os.getenv("LLM_LOCAL_PATH", "F:/models/meta-llama_Llama-3.2-3B-Instruct")
 GUARD_LOCAL_PATH = os.getenv("GUARD_LOCAL_PATH", "F:/models/meta-llama_Llama-Guard-3-1B")
-# 容器内路径：优先检查 /cache（当前挂载点），其次 /workspace/models
+# 容器内路径：优先检查 /cache（当前挂载点），其次 /workspace/hf_models
 LLM_CONTAINER_PATH = os.getenv("LLM_CONTAINER_PATH", "/cache/meta-llama_Llama-3.2-3B-Instruct")
 GUARD_CONTAINER_PATH = os.getenv("GUARD_CONTAINER_PATH", "/cache/meta-llama_Llama-Guard-3-1B")
 # 备用路径
-LLM_WORKSPACE_PATH = "/workspace/models/meta-llama_Llama-3.2-3B-Instruct"
-GUARD_WORKSPACE_PATH = "/workspace/models/meta-llama_Llama-Guard-3-1B"
+LLM_WORKSPACE_PATH = "/workspace/hf_models/meta-llama_Llama-3.2-3B-Instruct"
+GUARD_WORKSPACE_PATH = "/workspace/hf_models/meta-llama_Llama-Guard-3-1B"
 
 def check_model_path(path: str, name: str):
     """检查模型路径"""
@@ -74,8 +74,8 @@ def main():
     check_model_path(GUARD_CONTAINER_PATH, "安全分类器（容器内 - /cache）")
     
     # 检查备用路径
-    check_model_path(LLM_WORKSPACE_PATH, "推理模型（容器内 - /workspace/models）")
-    check_model_path(GUARD_WORKSPACE_PATH, "安全分类器（容器内 - /workspace/models）")
+    check_model_path(LLM_WORKSPACE_PATH, "推理模型（容器内 - /workspace/hf_models）")
+    check_model_path(GUARD_WORKSPACE_PATH, "安全分类器（容器内 - /workspace/hf_models）")
     
     # 检查本地路径（如果不在容器内）
     if not Path("/.dockerenv").exists() and not Path("/workspace").exists():
@@ -108,18 +108,18 @@ def main():
     else:
         print(f"✗ /cache/models 不存在")
     
-    # 检查 /workspace/models
-    workspace_models = Path("/workspace/models")
+    # 检查 /workspace/hf_models
+    workspace_models = Path("/workspace/hf_models")
     if workspace_models.exists():
-        print(f"✓ /workspace/models 存在")
+        print(f"✓ /workspace/hf_models 存在")
         items = list(workspace_models.iterdir())
         if items:
             print(f"  内容: {[item.name for item in items][:10]}")
         else:
             print(f"  目录为空")
     else:
-        print(f"✗ /workspace/models 不存在")
-        print(f"  提示: 如果模型在 F 盘，请确保启动容器时使用 -v F:/models:/workspace/models")
+        print(f"✗ /workspace/hf_models 不存在")
+        print(f"  提示: 如果模型在 F 盘，请确保启动容器时使用 -v F:/DC25/part1/NeuroBreak-Reproduction/hf_models:/workspace/hf_models")
 
 if __name__ == "__main__":
     main()

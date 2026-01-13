@@ -29,8 +29,8 @@ GUARD_LOCAL_PATH = os.getenv("GUARD_LOCAL_PATH", "F:/models/meta-llama_Llama-Gua
 LLM_CONTAINER_PATH = os.getenv("LLM_CONTAINER_PATH", "/cache/meta-llama_Llama-3.2-3B-Instruct")
 GUARD_CONTAINER_PATH = os.getenv("GUARD_CONTAINER_PATH", "/cache/meta-llama_Llama-Guard-3-1B")
 # 备用路径
-LLM_WORKSPACE_PATH = "/workspace/models/meta-llama_Llama-3.2-3B-Instruct"
-GUARD_WORKSPACE_PATH = "/workspace/models/meta-llama_Llama-Guard-3-1B"
+LLM_WORKSPACE_PATH = "/workspace/hf_models/meta-llama_Llama-3.2-3B-Instruct"
+GUARD_WORKSPACE_PATH = "/workspace/hf_models/meta-llama_Llama-Guard-3-1B"
 # HuggingFace模型ID（作为fallback）
 LLM_ID = "meta-llama/Llama-3.2-3B-Instruct"
 GUARD_ID = "meta-llama/Llama-Guard-3-1B"
