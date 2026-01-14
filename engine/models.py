@@ -103,16 +103,56 @@ def get_model_path(model_id: str, local_path: str, container_path: str, workspac
     # 额外检查：直接检查 /workspace/ms_models 目录（如果存在）
     ms_models_dir = Path("/workspace/ms_models")
     if ms_models_dir.exists() and ms_models_dir.is_dir():
+        print(f"[ModelManager] 检查 /workspace/ms_models 目录...")
+        print(f"[ModelManager] 查找模型: {model_name} (ID: {model_id})")
+        
+        # 列出所有子目录用于调试
+        found_dirs = []
+        for item in ms_models_dir.iterdir():
+            if item.is_dir():
+                has_config = (item / "config.json").exists()
+                found_dirs.append((item.name, has_config))
+                if has_config:
+                    print(f"[ModelManager]   发现目录: {item.name} (有 config.json)")
+        
+        # 尝试匹配模型目录
         for item in ms_models_dir.iterdir():
             if item.is_dir() and (item / "config.json").exists():
                 item_name = item.name
-                # 更宽松的匹配：只要包含模型名称的关键部分就认为匹配
-                if (model_name in item_name or 
+                # 提取关键匹配词：Meta-Llama-3-8B-Instruct -> ["Meta", "Llama", "3", "8B", "Instruct"]
+                # Llama-Guard-3-8B -> ["Llama", "Guard", "3", "8B"]
+                key_parts = [p for p in model_name.split("-") if len(p) > 1]
+                # 更宽松的匹配：只要包含关键部分就认为匹配
+                matches = (
+                    model_name in item_name or 
                     item_name in model_name or
                     model_id_flat in item_name or
-                    any(part in item_name for part in model_name.split("-") if len(part) > 3)):
-                    print(f"[ModelManager] 在 /workspace/ms_models 中找到模型: {item}")
+                    any(part in item_name for part in key_parts if len(part) > 2) or
+                    # 特殊匹配：Meta-Llama-3-8B-Instruct 匹配包含 "Meta-Llama-3-8B" 的目录
+                    (model_name.startswith("Meta-Llama") and "Meta-Llama" in item_name) or
+                    (model_name.startswith("Llama-Guard") and "Llama-Guard" in item_name)
+                )
+                if matches:
+                    print(f"[ModelManager] 在 /workspace/ms_models 中找到匹配的模型: {item}")
                     return str(item)
+        
+        # 如果没找到匹配的，但只有一个包含 config.json 的目录，也使用它
+        config_dirs = [item for item in ms_models_dir.iterdir() 
+                      if item.is_dir() and (item / "config.json").exists()]
+        if len(config_dirs) == 1:
+            print(f"[ModelManager] 在 /workspace/ms_models 中找到唯一模型目录: {config_dirs[0]}")
+            return str(config_dirs[0])
+        elif len(config_dirs) > 1:
+            print(f"[ModelManager] 警告: /workspace/ms_models 中有多个模型目录: {[d.name for d in config_dirs]}")
+            # 尝试根据模型类型选择
+            for config_dir in config_dirs:
+                dir_name = config_dir.name
+                if model_name.startswith("Meta-Llama") and "Llama" in dir_name and "Guard" not in dir_name:
+                    print(f"[ModelManager] 选择推理模型目录: {config_dir}")
+                    return str(config_dir)
+                elif model_name.startswith("Llama-Guard") and "Guard" in dir_name:
+                    print(f"[ModelManager] 选择 Guard 模型目录: {config_dir}")
+                    return str(config_dir)
     
     # 检查Windows本地路径（在容器内通常不存在，但保留检查）
     if local_path_obj.exists():
