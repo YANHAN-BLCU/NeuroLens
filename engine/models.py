@@ -42,7 +42,7 @@ def resolve_dtype() -> torch.dtype:
 
 def get_model_path(model_id: str, local_path: str, container_path: str, workspace_path: str = "") -> str:
     """
-    获取模型路径：优先使用本地路径，如果不存在则使用 ModelScope ID
+    获取模型路径：优先使用本地路径，如果不存在则检查 ModelScope 缓存或下载
     
     Args:
         model_id: ModelScope模型ID
@@ -51,7 +51,7 @@ def get_model_path(model_id: str, local_path: str, container_path: str, workspac
         workspace_path: Docker容器内备用路径
     
     Returns:
-        模型路径（本地路径、容器路径或 ModelScope ID）
+        模型路径（本地路径、容器路径或 ModelScope 缓存路径）
     """
     container_path_obj = Path(container_path)
     local_path_obj = Path(local_path)
@@ -87,8 +87,26 @@ def get_model_path(model_id: str, local_path: str, container_path: str, workspac
                     print(f"[ModelManager] 在父目录中找到模型: {item}")
                     return str(item)
     
-    # 否则使用HuggingFace ID
-    print(f"[ModelManager] 本地路径不存在，将使用 ModelScope ID: {model_id}")
+    # 检查 ModelScope 缓存目录
+    modelscope_cache = os.getenv("MODELSCOPE_CACHE") or os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE")
+    if not modelscope_cache:
+        modelscope_cache = str(Path.home() / ".cache" / "modelscope" / "hub")
+    
+    modelscope_cache_path = Path(modelscope_cache)
+    if modelscope_cache_path.exists():
+        # ModelScope 的目录结构通常是：cache_dir/model_id/revision/
+        # 尝试查找模型目录
+        model_name = model_id.replace("/", "_")
+        for item in modelscope_cache_path.iterdir():
+            if item.is_dir() and (item / "config.json").exists():
+                # 检查是否匹配模型名称
+                if model_name in item.name or model_id.split("/")[-1] in item.name:
+                    print(f"[ModelManager] 在 ModelScope 缓存中找到模型: {item}")
+                    return str(item)
+    
+    # 如果所有路径都不存在，返回 ModelScope ID（但会在加载时尝试下载）
+    print(f"[ModelManager] 本地路径不存在，将尝试从 ModelScope 下载: {model_id}")
+    print(f"[ModelManager] 提示: 请先运行 python scripts/download_models.py --all-8b 下载模型")
     return model_id
 
 
@@ -120,7 +138,34 @@ class ModelManager:
             )
             
             print(f"[ModelManager] Loading LLM: {model_path} (dtype: {torch_dtype})")
-            self._llm_tokenizer = AutoTokenizer.from_pretrained(model_path)
+            
+            # 如果是 ModelScope ID 且路径不存在，尝试使用 ModelScope 下载
+            if "/" in model_path and not Path(model_path).exists():
+                try:
+                    from modelscope import snapshot_download
+                    print(f"[ModelManager] 尝试从 ModelScope 下载模型: {model_path}")
+                    token = os.getenv("MODELSCOPE_TOKEN") or os.getenv("DASHSCOPE_API_KEY")
+                    if token:
+                        os.environ["MODELSCOPE_TOKEN"] = token
+                    
+                    cache_dir = os.getenv("MODELSCOPE_CACHE") or os.getenv("HF_HOME") or str(Path.home() / ".cache" / "modelscope" / "hub")
+                    downloaded_path = snapshot_download(
+                        model_id=model_path,
+                        cache_dir=cache_dir,
+                        revision="master",
+                    )
+                    model_path = downloaded_path
+                    print(f"[ModelManager] 模型已下载到: {model_path}")
+                except ImportError:
+                    print(f"[ModelManager] 错误: 需要安装 modelscope 库")
+                    print(f"[ModelManager] 请运行: pip install modelscope")
+                    raise
+                except Exception as e:
+                    print(f"[ModelManager] 从 ModelScope 下载失败: {e}")
+                    print(f"[ModelManager] 请确保模型已下载到本地路径或设置正确的 ModelScope token")
+                    raise
+            
+            self._llm_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
             if self._llm_tokenizer.pad_token is None:
                 self._llm_tokenizer.pad_token = self._llm_tokenizer.eos_token
 
@@ -128,6 +173,7 @@ class ModelManager:
                 model_path,
                 torch_dtype=torch_dtype,
                 device_map="auto" if torch.cuda.is_available() else None,
+                trust_remote_code=True,
             )
             self._llm_model.eval()
             print("[ModelManager] LLM loaded successfully")
@@ -147,7 +193,34 @@ class ModelManager:
             )
             
             print(f"[ModelManager] Loading Guard: {model_path} (dtype: {torch_dtype})")
-            self._guard_tokenizer = AutoTokenizer.from_pretrained(model_path)
+            
+            # 如果是 ModelScope ID 且路径不存在，尝试使用 ModelScope 下载
+            if "/" in model_path and not Path(model_path).exists():
+                try:
+                    from modelscope import snapshot_download
+                    print(f"[ModelManager] 尝试从 ModelScope 下载模型: {model_path}")
+                    token = os.getenv("MODELSCOPE_TOKEN") or os.getenv("DASHSCOPE_API_KEY")
+                    if token:
+                        os.environ["MODELSCOPE_TOKEN"] = token
+                    
+                    cache_dir = os.getenv("MODELSCOPE_CACHE") or os.getenv("HF_HOME") or str(Path.home() / ".cache" / "modelscope" / "hub")
+                    downloaded_path = snapshot_download(
+                        model_id=model_path,
+                        cache_dir=cache_dir,
+                        revision="master",
+                    )
+                    model_path = downloaded_path
+                    print(f"[ModelManager] 模型已下载到: {model_path}")
+                except ImportError:
+                    print(f"[ModelManager] 错误: 需要安装 modelscope 库")
+                    print(f"[ModelManager] 请运行: pip install modelscope")
+                    raise
+                except Exception as e:
+                    print(f"[ModelManager] 从 ModelScope 下载失败: {e}")
+                    print(f"[ModelManager] 请确保模型已下载到本地路径或设置正确的 ModelScope token")
+                    raise
+            
+            self._guard_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
             if self._guard_tokenizer.pad_token is None:
                 self._guard_tokenizer.pad_token = self._guard_tokenizer.eos_token
 
@@ -155,6 +228,7 @@ class ModelManager:
                 model_path,
                 torch_dtype=torch_dtype,
                 device_map="auto" if torch.cuda.is_available() else None,
+                trust_remote_code=True,
             )
             self._guard_model.eval()
             print("[ModelManager] Guard loaded successfully")
