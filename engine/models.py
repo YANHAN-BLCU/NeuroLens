@@ -64,12 +64,55 @@ def get_model_path(model_id: str, local_path: str, container_path: str, workspac
             print(f"[ModelManager] 使用容器内路径: {container_path}")
             return str(container_path_obj)
     
-    # 检查备用容器路径
+    # 检查备用容器路径（workspace_path，通常是 /workspace/ms_models/...）
     if workspace_path_obj and workspace_path_obj.exists():
         config_file = workspace_path_obj / "config.json"
         if config_file.exists():
             print(f"[ModelManager] 使用备用容器路径: {workspace_path}")
             return str(workspace_path_obj)
+    
+    # 检查父目录是否存在（可能模型在子目录中）
+    # 优先检查 workspace_path 的父目录（/workspace/ms_models）
+    parent_paths = []
+    if workspace_path_obj:
+        parent_paths.append(workspace_path_obj.parent)
+    if container_path_obj.parent not in parent_paths:
+        parent_paths.append(container_path_obj.parent)
+    
+    # 提取模型名称（从 model_id 或路径中）
+    model_name_parts = model_id.split("/")
+    model_name = model_name_parts[-1] if len(model_name_parts) > 0 else ""
+    model_id_flat = model_id.replace("/", "_")
+    
+    for parent_path in parent_paths:
+        if parent_path and parent_path.exists():
+            # 尝试查找模型目录
+            for item in parent_path.iterdir():
+                if item.is_dir():
+                    # 检查是否有 config.json
+                    if (item / "config.json").exists():
+                        # 检查目录名是否匹配模型名称（更宽松的匹配）
+                        item_name = item.name
+                        if (model_name in item_name or 
+                            item_name in model_name or
+                            model_id_flat in item_name or
+                            model_id_flat.replace("-", "_") in item_name.replace("-", "_")):
+                            print(f"[ModelManager] 在父目录中找到模型: {item}")
+                            return str(item)
+    
+    # 额外检查：直接检查 /workspace/ms_models 目录（如果存在）
+    ms_models_dir = Path("/workspace/ms_models")
+    if ms_models_dir.exists() and ms_models_dir.is_dir():
+        for item in ms_models_dir.iterdir():
+            if item.is_dir() and (item / "config.json").exists():
+                item_name = item.name
+                # 更宽松的匹配：只要包含模型名称的关键部分就认为匹配
+                if (model_name in item_name or 
+                    item_name in model_name or
+                    model_id_flat in item_name or
+                    any(part in item_name for part in model_name.split("-") if len(part) > 3)):
+                    print(f"[ModelManager] 在 /workspace/ms_models 中找到模型: {item}")
+                    return str(item)
     
     # 检查Windows本地路径（在容器内通常不存在，但保留检查）
     if local_path_obj.exists():
@@ -77,15 +120,6 @@ def get_model_path(model_id: str, local_path: str, container_path: str, workspac
         if config_file.exists():
             print(f"[ModelManager] 使用本地路径: {local_path}")
             return str(local_path_obj)
-    
-    # 检查父目录是否存在（可能模型在子目录中）
-    for parent_path in [container_path_obj.parent, workspace_path_obj.parent if workspace_path_obj else None]:
-        if parent_path and parent_path.exists():
-            # 尝试查找模型目录
-            for item in parent_path.iterdir():
-                if item.is_dir() and (item / "config.json").exists():
-                    print(f"[ModelManager] 在父目录中找到模型: {item}")
-                    return str(item)
     
     # 检查 ModelScope 缓存目录（递归搜索）
     modelscope_cache = os.getenv("MODELSCOPE_CACHE") or os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE")
