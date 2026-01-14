@@ -282,16 +282,35 @@ class ModelManager:
             
             self._llm_model.eval()
             
-            # 验证模型设备
+            # 验证并确保模型在 GPU 上
             if torch.cuda.is_available():
                 device_info = {}
+                cpu_params = []
                 for name, param in self._llm_model.named_parameters():
                     if param.device.type == "cuda":
                         device_info[name] = param.device
+                    else:
+                        cpu_params.append(name)
+                
                 if device_info:
                     print(f"[ModelManager] LLM 已加载到 GPU，参数设备: {list(device_info.values())[0]}")
                 else:
-                    print("[ModelManager] 警告: LLM 未检测到 GPU 参数，可能在使用 CPU")
+                    print("[ModelManager] 警告: LLM 未检测到 GPU 参数，尝试移动到 GPU...")
+                    # 强制将模型移动到 GPU
+                    try:
+                        self._llm_model = self._llm_model.to(torch.device("cuda:0"))
+                        print("[ModelManager] LLM 已移动到 GPU: cuda:0")
+                    except Exception as e:
+                        print(f"[ModelManager] 错误: 无法将 LLM 移动到 GPU: {e}")
+                
+                # 如果部分参数在 CPU 上，也尝试移动
+                if cpu_params:
+                    print(f"[ModelManager] 警告: 发现 {len(cpu_params)} 个 LLM 参数在 CPU 上，尝试移动...")
+                    try:
+                        self._llm_model = self._llm_model.to(torch.device("cuda:0"))
+                        print("[ModelManager] LLM 所有参数已移动到 GPU")
+                    except Exception as e:
+                        print(f"[ModelManager] 错误: 无法移动参数到 GPU: {e}")
             print("[ModelManager] LLM loaded successfully")
         return self._llm_tokenizer, self._llm_model
 
@@ -340,16 +359,35 @@ class ModelManager:
             
             self._guard_model.eval()
             
-            # 验证模型设备
+            # 验证并确保模型在 GPU 上
             if torch.cuda.is_available():
                 device_info = {}
+                cpu_params = []
                 for name, param in self._guard_model.named_parameters():
                     if param.device.type == "cuda":
                         device_info[name] = param.device
+                    else:
+                        cpu_params.append(name)
+                
                 if device_info:
                     print(f"[ModelManager] Guard 已加载到 GPU，参数设备: {list(device_info.values())[0]}")
                 else:
-                    print("[ModelManager] 警告: Guard 未检测到 GPU 参数，可能在使用 CPU")
+                    print("[ModelManager] 警告: Guard 未检测到 GPU 参数，尝试移动到 GPU...")
+                    # 强制将模型移动到 GPU
+                    try:
+                        self._guard_model = self._guard_model.to(torch.device("cuda:0"))
+                        print("[ModelManager] Guard 已移动到 GPU: cuda:0")
+                    except Exception as e:
+                        print(f"[ModelManager] 错误: 无法将 Guard 移动到 GPU: {e}")
+                
+                # 如果部分参数在 CPU 上，也尝试移动
+                if cpu_params:
+                    print(f"[ModelManager] 警告: 发现 {len(cpu_params)} 个参数在 CPU 上，尝试移动...")
+                    try:
+                        self._guard_model = self._guard_model.to(torch.device("cuda:0"))
+                        print("[ModelManager] Guard 所有参数已移动到 GPU")
+                    except Exception as e:
+                        print(f"[ModelManager] 错误: 无法移动参数到 GPU: {e}")
             print("[ModelManager] Guard loaded successfully")
         return self._guard_tokenizer, self._guard_model
 
