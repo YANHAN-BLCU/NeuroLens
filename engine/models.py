@@ -15,6 +15,14 @@ from typing import Optional, Tuple
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+# 优化 GPU 性能设置
+if torch.cuda.is_available():
+    # 启用 cuDNN benchmark 以优化卷积操作
+    torch.backends.cudnn.benchmark = True
+    # 启用 TensorFloat-32 (TF32) 以加速计算（Ampere 架构及以上）
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
 
 # 默认推理模型：8B 版本（ModelScope）
 LLM_ID = "LLM-Research/Meta-Llama-3-8B-Instruct"
@@ -411,9 +419,11 @@ class ModelManager:
 
         start_time = time.time()
         with torch.inference_mode():
+            # 使用更高效的生成设置
             output_ids = model.generate(
                 **inputs,
                 **generate_kwargs,
+                use_cache=True,  # 启用 KV cache 加速
             )
         latency_ms = (time.time() - start_time) * 1000
 
@@ -476,6 +486,7 @@ class ModelManager:
                 do_sample=False,
                 eos_token_id=tokenizer.eos_token_id,
                 pad_token_id=tokenizer.pad_token_id,
+                use_cache=True,  # 启用 KV cache 加速
             )
 
         response = tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
