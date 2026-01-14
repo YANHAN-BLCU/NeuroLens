@@ -1,13 +1,18 @@
 """
-下载推理模型和安全分类器脚本
+下载推理模型和安全分类器脚本（使用 ModelScope）
 
 支持下载：
-- 推理模型：meta-llama/Llama-3.2-3B-Instruct
-- 安全分类器：meta-llama/Llama-Guard-3-1B
+- 推理模型：
+  - LLM-Research/Llama-3.2-3B-Instruct (默认)
+  - LLM-Research/Meta-Llama-3-8B-Instruct
+- 安全分类器：
+  - LLM-Research/Llama-Guard-3-1B (默认)
+  - LLM-Research/Llama-Guard-3-8B
 
 使用方法：
-    python scripts/download_models.py --model meta-llama/Llama-3.2-3B-Instruct --classifier meta-llama/Llama-Guard-3-1B
+    python scripts/download_models.py --model LLM-Research/Llama-3.2-3B-Instruct --classifier LLM-Research/Llama-Guard-3-1B
     python scripts/download_models.py --all  # 下载默认的两个模型
+    python scripts/download_models.py --model-8b --classifier-8b  # 下载 8B 模型
 """
 
 import argparse
@@ -17,26 +22,39 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from huggingface_hub import snapshot_download, login
-    from huggingface_hub.utils import HfHubHTTPError
+    from modelscope import snapshot_download
+    from modelscope.hub.api import HubApi
 except ImportError:
-    print("错误: 需要安装 huggingface_hub")
-    print("请运行: pip install huggingface_hub")
+    print("错误: 需要安装 modelscope")
+    print("请运行: pip install modelscope")
     sys.exit(1)
 
+# ModelScope 错误处理
+try:
+    from modelscope.hub.errors import NotExistError, RequestError
+except ImportError:
+    # 如果导入失败，使用通用异常
+    NotExistError = FileNotFoundError
+    RequestError = Exception
 
-# 默认模型配置
-DEFAULT_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
-DEFAULT_CLASSIFIER = "meta-llama/Llama-Guard-3-1B"
+
+# 默认模型配置（ModelScope 格式）
+DEFAULT_MODEL = "LLM-Research/Llama-3.2-3B-Instruct"
+DEFAULT_CLASSIFIER = "LLM-Research/Llama-Guard-3-1B"
+
+# 8B 模型配置
+MODEL_8B = "LLM-Research/Meta-Llama-3-8B-Instruct"
+CLASSIFIER_8B = "LLM-Research/Llama-Guard-3-8B"
 
 
 def get_cache_dir() -> Path:
     """获取模型缓存目录"""
-    cache_dir = os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE")
+    # ModelScope 默认缓存目录
+    cache_dir = os.getenv("MODELSCOPE_CACHE") or os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE")
     if cache_dir:
         return Path(cache_dir) / "models"
-    # 默认使用用户目录下的缓存
-    return Path.home() / ".cache" / "huggingface" / "models"
+    # 默认使用用户目录下的缓存（ModelScope 兼容 HuggingFace 缓存路径）
+    return Path.home() / ".cache" / "modelscope" / "hub"
 
 
 def download_model(
@@ -47,14 +65,14 @@ def download_model(
     max_workers: int = 8,
 ) -> Path:
     """
-    下载单个模型
+    下载单个模型（使用 ModelScope）
     
     Args:
-        model_id: HuggingFace 模型 ID
+        model_id: ModelScope 模型 ID
         cache_dir: 缓存目录
-        token: HuggingFace token（可选，优先使用环境变量）
+        token: ModelScope token（可选，优先使用环境变量）
         max_retries: 最大重试次数
-        max_workers: 最大并发下载数
+        max_workers: 最大并发下载数（ModelScope 暂不支持，保留参数）
     
     Returns:
         模型本地路径
@@ -65,16 +83,14 @@ def download_model(
     
     # 获取 token
     if not token:
-        token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
+        token = os.getenv("MODELSCOPE_TOKEN") or os.getenv("DASHSCOPE_API_KEY") or os.getenv("HF_TOKEN")
     
-    # 如果 token 存在，尝试登录
+    # 如果 token 存在，设置环境变量
     if token:
-        try:
-            login(token=token, add_to_git_credential=False)
-            print(f"✓ 已使用 token 登录 HuggingFace")
-        except Exception as e:
-            print(f"⚠ 登录失败，将尝试匿名下载: {e}")
+        os.environ["MODELSCOPE_TOKEN"] = token
+        print(f"✓ 已设置 ModelScope token")
     
+    # ModelScope 会自动处理缓存目录，但我们也可以指定本地目录
     # 构建本地目录路径
     local_dir = cache_dir / model_id.replace("/", "_")
     
@@ -94,39 +110,47 @@ def download_model(
     while retry_count < max_retries:
         try:
             print(f"下载中... (尝试 {retry_count + 1}/{max_retries})")
-            snapshot_download(
-                repo_id=model_id,
-                local_dir=str(local_dir),
-                local_dir_use_symlinks=False,
-                resume_download=True,
-                token=token,
-                max_workers=max_workers,
+            # ModelScope 的 snapshot_download 会自动处理缓存
+            # 如果指定了 local_dir，会下载到该目录；否则使用 cache_dir
+            model_path = snapshot_download(
+                model_id=model_id,
+                cache_dir=str(cache_dir),
+                local_dir=str(local_dir) if local_dir != cache_dir / model_id.replace("/", "_") else None,
+                revision="master",
             )
-            print(f"✓ 模型下载完成: {local_dir}")
-            return local_dir
-            
-        except HfHubHTTPError as e:
-            if e.response.status_code == 401:
-                print(f"✗ 认证失败: 请检查 HuggingFace token 和模型访问权限")
-                print(f"  提示: 在 HuggingFace 官网申请 {model_id} 的访问权限")
-                print(f"  然后设置环境变量: export HF_TOKEN=your_token")
-                sys.exit(1)
-            elif e.response.status_code == 404:
-                print(f"✗ 模型不存在: {model_id}")
-                sys.exit(1)
+            # ModelScope 返回的路径可能是缓存路径，优先使用 local_dir
+            if local_dir.exists() and any(local_dir.iterdir()):
+                final_path = local_dir
             else:
-                retry_count += 1
-                if retry_count < max_retries:
-                    print(f"⚠ 下载失败，将重试: {e}")
-                else:
-                    print(f"✗ 下载失败，已达最大重试次数: {e}")
-                    sys.exit(1)
+                final_path = Path(model_path)
+            print(f"✓ 模型下载完成: {final_path}")
+            return final_path
+            
         except Exception as e:
+            error_str = str(e).lower()
+            
+            # 检查是否是模型不存在错误
+            if "not found" in error_str or "not exist" in error_str or "404" in error_str:
+                print(f"✗ 模型不存在: {model_id}")
+                print(f"  提示: 请检查 ModelScope 上是否存在该模型")
+                print(f"  访问 https://modelscope.cn/models 搜索模型")
+                sys.exit(1)
+            
+            # 检查是否是认证错误
+            if "401" in error_str or "unauthorized" in error_str or "token" in error_str or "permission" in error_str:
+                print(f"✗ 认证失败: 请检查 ModelScope token")
+                print(f"  提示: 在 ModelScope 官网获取 token")
+                print(f"  设置环境变量: export MODELSCOPE_TOKEN=your_token")
+                sys.exit(1)
+            
+            # 其他错误，重试
             retry_count += 1
             if retry_count < max_retries:
-                print(f"⚠ 下载出错，将重试: {e}")
+                print(f"⚠ 下载失败，将重试: {e}")
             else:
-                print(f"✗ 下载失败: {e}")
+                print(f"✗ 下载失败，已达最大重试次数: {e}")
+                print(f"  提示: 可能需要设置 ModelScope token")
+                print(f"  设置环境变量: export MODELSCOPE_TOKEN=your_token")
                 sys.exit(1)
     
     return local_dir
@@ -176,17 +200,29 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 示例:
-  # 下载默认的两个模型
+  # 下载默认的两个模型（3B）
   python {sys.argv[0]} --all
+  
+  # 下载 8B 的两个模型
+  python {sys.argv[0]} --all-8b
   
   # 单独下载推理模型
   python {sys.argv[0]} --model {DEFAULT_MODEL}
   
+  # 下载 8B 推理模型
+  python {sys.argv[0]} --model-8b
+  
   # 单独下载分类器
   python {sys.argv[0]} --classifier {DEFAULT_CLASSIFIER}
   
+  # 下载 8B 分类器
+  python {sys.argv[0]} --classifier-8b
+  
   # 自定义模型和输出目录
   python {sys.argv[0]} --model {DEFAULT_MODEL} --classifier {DEFAULT_CLASSIFIER} --output /path/to/cache
+  
+  # 混合使用：3B 推理模型 + 8B 分类器
+  python {sys.argv[0]} --model {DEFAULT_MODEL} --classifier-8b
   
   # 使用并发下载和验证
   python {sys.argv[0]} --all --max-workers 8 --verify
@@ -209,14 +245,29 @@ def main():
         help="下载默认的两个模型（推理模型 + 安全分类器）",
     )
     parser.add_argument(
+        "--model-8b",
+        action="store_true",
+        help=f"使用 8B 推理模型: {MODEL_8B}",
+    )
+    parser.add_argument(
+        "--classifier-8b",
+        action="store_true",
+        help=f"使用 8B 安全分类器: {CLASSIFIER_8B}",
+    )
+    parser.add_argument(
+        "--all-8b",
+        action="store_true",
+        help="下载 8B 的两个模型（8B 推理模型 + 8B 安全分类器）",
+    )
+    parser.add_argument(
         "--output",
         type=str,
-        help="模型缓存目录（默认: $HF_HOME/models 或 ~/.cache/huggingface/models）",
+        help="模型缓存目录（默认: $MODELSCOPE_CACHE/models 或 ~/.cache/modelscope/hub）",
     )
     parser.add_argument(
         "--token",
         type=str,
-        help="HuggingFace token（也可通过环境变量 HF_TOKEN 设置）",
+        help="ModelScope token（也可通过环境变量 MODELSCOPE_TOKEN 设置）",
     )
     parser.add_argument(
         "--max-retries",
@@ -240,12 +291,22 @@ def main():
     
     # 确定要下载的模型
     models_to_download = []
+    
+    # 处理 --all 和 --all-8b 选项
     if args.all:
         models_to_download = [DEFAULT_MODEL, DEFAULT_CLASSIFIER]
+    elif args.all_8b:
+        models_to_download = [MODEL_8B, CLASSIFIER_8B]
     else:
-        if args.model:
+        # 处理单个模型选项
+        if args.model_8b:
+            models_to_download.append(MODEL_8B)
+        elif args.model:
             models_to_download.append(args.model)
-        if args.classifier:
+        
+        if args.classifier_8b:
+            models_to_download.append(CLASSIFIER_8B)
+        elif args.classifier:
             models_to_download.append(args.classifier)
     
     if not models_to_download:

@@ -37,15 +37,24 @@ Write-Host ""
 $ModelsToDelete = @()
 
 foreach ($modelName in $Models) {
-    Write-Host "查找模型: $modelName" -ForegroundColor Yellow
+    Write-Host "Searching for model: $modelName" -ForegroundColor Yellow
     
     foreach ($basePath in $ModelPaths) {
         $modelPath = Join-Path $basePath $modelName
         
         # 检查项目内的 hf_models 目录
         if ($basePath -eq "hf_models") {
-            $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-            $modelPath = Join-Path $projectRoot "hf_models" $modelName
+            # 获取脚本所在目录的父目录（项目根目录）
+            if ($PSScriptRoot) {
+                $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+            } else {
+                # 如果 PSScriptRoot 不可用，使用当前工作目录
+                $projectRoot = Get-Location
+                if ($projectRoot.Path -like "*scripts*") {
+                    $projectRoot = Split-Path -Parent $projectRoot.Path
+                }
+            }
+            $modelPath = Join-Path (Join-Path $projectRoot "hf_models") $modelName
         }
         
         if (Test-Path $modelPath) {
@@ -63,13 +72,13 @@ foreach ($modelName in $Models) {
 }
 
 if ($ModelsToDelete.Count -eq 0) {
-    Write-Host "未找到任何模型文件。" -ForegroundColor Yellow
+    Write-Host "No model files found." -ForegroundColor Yellow
     exit 0
 }
 
 # 显示要删除的模型
 Write-Host ""
-Write-Host "将要删除以下模型:" -ForegroundColor Yellow
+Write-Host "Models to be deleted:" -ForegroundColor Yellow
 $totalSize = 0
 foreach ($model in $ModelsToDelete) {
     $modelSizeRounded = [math]::Round($model.Size, 2)
@@ -78,45 +87,45 @@ foreach ($model in $ModelsToDelete) {
 }
 Write-Host ""
 $totalSizeRounded = [math]::Round($totalSize, 2)
-Write-Host "总计大小: $totalSizeRounded GB" -ForegroundColor Red
+Write-Host "Total size: $totalSizeRounded GB" -ForegroundColor Red
 Write-Host ""
 
 # 确认删除
 if (-not $Confirm) {
-    $response = Read-Host "确认删除以上模型? (yes/no)"
+    $response = Read-Host "Confirm deletion? (yes/no)"
     if ($response -ne "yes" -and $response -ne "y") {
-        Write-Host "已取消删除操作。" -ForegroundColor Yellow
+        Write-Host "Deletion cancelled." -ForegroundColor Yellow
         exit 0
     }
 }
 
 # 执行删除
 Write-Host ""
-Write-Host "开始删除..." -ForegroundColor Yellow
+Write-Host "Starting deletion..." -ForegroundColor Yellow
 $deletedCount = 0
 $failedCount = 0
 
 foreach ($model in $ModelsToDelete) {
     try {
-        Write-Host "删除: $($model.Path)" -ForegroundColor Yellow
+        Write-Host "Deleting: $($model.Path)" -ForegroundColor Yellow
         Remove-Item -Path $model.Path -Recurse -Force -ErrorAction Stop
-        Write-Host "  ✓ 已删除: $($model.Name)" -ForegroundColor Green
+        Write-Host "  [OK] Deleted: $($model.Name)" -ForegroundColor Green
         $deletedCount++
     }
     catch {
-        Write-Host "  ✗ 删除失败: $($model.Name) - $_" -ForegroundColor Red
+        Write-Host "  [FAIL] Failed to delete: $($model.Name) - $_" -ForegroundColor Red
         $failedCount++
     }
 }
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "删除完成" -ForegroundColor Cyan
+Write-Host "Deletion Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "成功删除: $deletedCount 个模型" -ForegroundColor Green
+Write-Host "Successfully deleted: $deletedCount model(s)" -ForegroundColor Green
 if ($failedCount -gt 0) {
-    Write-Host "删除失败: $failedCount 个模型" -ForegroundColor Red
+    Write-Host "Failed to delete: $failedCount model(s)" -ForegroundColor Red
 }
 $finalSizeRounded = [math]::Round($totalSize, 2)
-Write-Host "释放空间: $finalSizeRounded GB" -ForegroundColor Green
+Write-Host "Space freed: $finalSizeRounded GB" -ForegroundColor Green
 

@@ -7,6 +7,7 @@ param(
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 4173,
     [string]$ModelPath = "F:/models",
+    [string]$ModelScopeToken = "",
     [switch]$Detached = $false
 )
 
@@ -96,6 +97,17 @@ $dockerArgs += @(
     "-v", $workspaceMount,
     "-v", "${cacheMount}:/workspace/.cache"
 )
+
+# 如果提供了 ModelScope token，添加环境变量
+if ($ModelScopeToken) {
+    Write-Host "设置 ModelScope token 环境变量" -ForegroundColor Green
+    $dockerArgs += "-e"
+    $dockerArgs += "MODELSCOPE_TOKEN=$ModelScopeToken"
+} elseif ($env:MODELSCOPE_TOKEN) {
+    Write-Host "使用环境变量中的 ModelScope token" -ForegroundColor Green
+    $dockerArgs += "-e"
+    $dockerArgs += "MODELSCOPE_TOKEN=$env:MODELSCOPE_TOKEN"
+}
 
 # 如果提供了模型路径，添加模型挂载
 if ($ModelPath -and (Test-Path $ModelPath)) {

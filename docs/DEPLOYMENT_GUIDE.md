@@ -29,7 +29,10 @@
 
 - 一台具备 NVIDIA GPU 的 Linux 服务器（推荐 24G 显存+），已安装 Docker ≥ 24.0 与 `nvidia-container-toolkit`。
 - 本地开发机安装 Git、Node.js 18+/pnpm 或 npm、`scp/rsync` 等上传工具。
-- HuggingFace 账号并已申请 `meta-llama/Llama-3.2-3B-Instruct` 与 `meta-llama/Llama-Guard-3-1B` 访问权限。
+- ModelScope 账号（推荐，中国大陆访问更快）或 HuggingFace 账号，已申请模型访问权限。
+  - ModelScope: `LLM-Research/Llama-3.2-3B-Instruct` 与 `LLM-Research/Llama-Guard-3-1B`
+  - ModelScope 8B: `LLM-Research/Meta-Llama-3-8B-Instruct` 与 `LLM-Research/Llama-Guard-3-8B`
+  - HuggingFace: `meta-llama/Llama-3.2-3B-Instruct` 与 `meta-llama/Llama-Guard-3-1B`
 - 开放端口：后端默认 `8000`，前端默认 `4173`（可按需修改）。
 
 ## 准备与上传项目文件
@@ -108,11 +111,13 @@ docker run --gpus all -it \
 - 模型路径应为: `F:/models/meta-llama_Llama-3.2-3B-Instruct` 和 `F:/models/meta-llama_Llama-Guard-3-1B`
 - 详细说明请参考 [Docker 模型挂载配置指南](DOCKER_MODEL_MOUNT.md)
 
-进入容器后，默认工作目录为 `/workspace`。可以创建 `.env` 记录敏感配置（如 HuggingFace Token）：
+进入容器后，默认工作目录为 `/workspace`。可以创建 `.env` 记录敏感配置（如 ModelScope Token）：
 
 ```bash
 cat <<'EOF' > /workspace/.env
-HF_TOKEN=hf_xxx
+MODELSCOPE_TOKEN=your_modelscope_token
+# 或者使用 HuggingFace Token（如果使用 HuggingFace）
+# HF_TOKEN=hf_xxx
 VITE_API_BASE_URL=http://SERVER_IP:8000
 VITE_USE_MOCK=false
 EOF
@@ -135,21 +140,38 @@ python scripts/run_io_tests.py
 
 ### 方式2: 在容器内下载模型
 
-1. **登录 HuggingFace（可选）**
+1. **设置 ModelScope Token（推荐，中国大陆访问更快）**
    ```bash
-   huggingface-cli login --token $HF_TOKEN
+   export MODELSCOPE_TOKEN=your_modelscope_token
+   ```
+   
+   或者在启动容器时设置：
+   ```bash
+   docker run --gpus all -it \
+     -e MODELSCOPE_TOKEN=your_modelscope_token \
+     ...
    ```
 
-2. **下载模型**
+2. **下载模型（使用 ModelScope）**
    ```bash
    # 下载到容器内的缓存目录
    python scripts/download_models.py --all \
-     --output /workspace/.cache/huggingface/models
+     --output /workspace/.cache/modelscope/hub
    
    # 或下载到挂载的模型目录（Windows F盘）
    python scripts/download_models.py --all \
      --output /workspace/models
    ```
+   
+   **使用 HuggingFace（备选方案）**
+   
+   如果需要使用 HuggingFace，需要先登录：
+   ```bash
+   export HF_TOKEN=hf_xxx
+   huggingface-cli login --token $HF_TOKEN
+   ```
+   
+   然后修改 `scripts/download_models.py` 中的模型 ID 为 HuggingFace 格式。
 
 3. **运行 I/O 冒烟测试**
    ```bash
@@ -185,7 +207,7 @@ python scripts/start_server.py
 python -m engine.server
 ```
 
-> 注意：首次启动时会自动下载模型（`meta-llama/Llama-3.2-3B-Instruct` 和 `meta-llama/Llama-Guard-3-1B`），需要确保已配置 HuggingFace Token 并申请了模型访问权限。
+> 注意：首次启动时会自动下载模型（`LLM-Research/Llama-3.2-3B-Instruct` 和 `LLM-Research/Llama-Guard-3-1B`），需要确保已配置 ModelScope Token 并申请了模型访问权限。如果使用 HuggingFace，需要配置 `HF_TOKEN`。
 
 > 若后端尚未完成或需要快速演示，可将前端 `.env` 中的 `VITE_USE_MOCK` 设为 `true`，前端会返回 `frontend/src/lib/mock.ts` 提供的模拟数据。
 
@@ -253,7 +275,8 @@ python -m engine.server
 ## 常见问题排查
 
 - **端口被占用**：修改 `docker run` 或 `npm run preview` 中的 `-p` 端口映射，确保与宿主机其他服务不冲突。
-- **HuggingFace 下载报 401/403**：确认已申请模型权限，并在容器内 `export HF_TOKEN=...` 后重试。
+- **ModelScope 下载报 401/403**：确认已申请模型权限，并在容器内 `export MODELSCOPE_TOKEN=...` 后重试。
+- **HuggingFace 下载报 401/403**（如果使用 HuggingFace）：确认已申请模型权限，并在容器内 `export HF_TOKEN=...` 后重试。
 - **显存不足**：在 `scripts/run_io_tests.py` 中调低 `max_new_tokens` 或切换到 CPU（自动 fallback 为 `float32`）。
 - **前端无法访问 API**：检查 `frontend/.env` 配置、CORS 设置以及后端日志。临时可将 `VITE_USE_MOCK=true` 验证 UI。
 - **构建 Warning（chunk 过大）**：可在 `frontend/vite.config.ts` 中通过 `build.chunkSizeWarningLimit` 调整，或拆分图表等大依赖。

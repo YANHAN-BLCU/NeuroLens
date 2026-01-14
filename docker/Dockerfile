@@ -23,6 +23,7 @@ COPY . /workspace
 
 ENV HF_HOME=/workspace/.cache/huggingface \
     TRANSFORMERS_CACHE=/workspace/.cache/huggingface \
+    MODELSCOPE_CACHE=/workspace/.cache/modelscope \
     TORCH_HOME=/workspace/.cache/torch \
     PYTHONPATH=/workspace
 
