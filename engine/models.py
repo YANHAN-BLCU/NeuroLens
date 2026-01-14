@@ -87,26 +87,54 @@ def get_model_path(model_id: str, local_path: str, container_path: str, workspac
                     print(f"[ModelManager] 在父目录中找到模型: {item}")
                     return str(item)
     
-    # 检查 ModelScope 缓存目录
+    # 检查 ModelScope 缓存目录（递归搜索）
     modelscope_cache = os.getenv("MODELSCOPE_CACHE") or os.getenv("HF_HOME") or os.getenv("TRANSFORMERS_CACHE")
     if not modelscope_cache:
         modelscope_cache = str(Path.home() / ".cache" / "modelscope" / "hub")
     
     modelscope_cache_path = Path(modelscope_cache)
     if modelscope_cache_path.exists():
-        # ModelScope 的目录结构通常是：cache_dir/model_id/revision/
-        # 尝试查找模型目录
-        model_name = model_id.replace("/", "_")
+        # ModelScope 的目录结构可能是：
+        # - cache_dir/model_id/revision/
+        # - cache_dir/models--org--model_name/snapshots/hash/
+        # 递归搜索包含 config.json 的目录
+        model_name_parts = model_id.split("/")
+        model_org = model_name_parts[0] if len(model_name_parts) > 0 else ""
+        model_name = model_name_parts[-1] if len(model_name_parts) > 0 else ""
+        
+        # 搜索策略1: 直接匹配 model_id 格式 (org_model_name)
+        model_id_flat = model_id.replace("/", "_")
+        for root, dirs, files in os.walk(modelscope_cache_path):
+            root_path = Path(root)
+            # 检查当前目录是否有 config.json
+            if (root_path / "config.json").exists():
+                # 检查目录名是否匹配
+                dir_name = root_path.name
+                parent_name = root_path.parent.name if root_path.parent != root_path else ""
+                # 匹配多种可能的命名格式
+                if (model_id_flat in dir_name or 
+                    model_name in dir_name or 
+                    model_org in dir_name or
+                    model_id_flat in parent_name or
+                    model_name in parent_name):
+                    print(f"[ModelManager] 在 ModelScope 缓存中找到模型: {root_path}")
+                    return str(root_path)
+        
+        # 搜索策略2: 查找 models--org--model 格式的目录
+        models_prefix = f"models--{model_org.replace('-', '--')}--{model_name.replace('-', '--')}"
         for item in modelscope_cache_path.iterdir():
-            if item.is_dir() and (item / "config.json").exists():
-                # 检查是否匹配模型名称
-                if model_name in item.name or model_id.split("/")[-1] in item.name:
-                    print(f"[ModelManager] 在 ModelScope 缓存中找到模型: {item}")
-                    return str(item)
+            if item.is_dir() and models_prefix in item.name:
+                # 在 snapshots 子目录中查找
+                snapshots_dir = item / "snapshots"
+                if snapshots_dir.exists():
+                    for snapshot in snapshots_dir.iterdir():
+                        if snapshot.is_dir() and (snapshot / "config.json").exists():
+                            print(f"[ModelManager] 在 ModelScope 缓存中找到模型: {snapshot}")
+                            return str(snapshot)
     
-    # 如果所有路径都不存在，返回 ModelScope ID（但会在加载时尝试下载）
-    print(f"[ModelManager] 本地路径不存在，将尝试从 ModelScope 下载: {model_id}")
-    print(f"[ModelManager] 提示: 请先运行 python scripts/download_models.py --all-8b 下载模型")
+    # 如果所有路径都不存在，返回 ModelScope ID
+    print(f"[ModelManager] 警告: 未找到模型路径，将使用 ModelScope ID: {model_id}")
+    print(f"[ModelManager] 提示: 请确保模型已下载，或运行 python scripts/download_models.py --all-8b 下载模型")
     return model_id
 
 
@@ -139,31 +167,12 @@ class ModelManager:
             
             print(f"[ModelManager] Loading LLM: {model_path} (dtype: {torch_dtype})")
             
-            # 如果是 ModelScope ID 且路径不存在，尝试使用 ModelScope 下载
+            # 检查路径是否存在
             if "/" in model_path and not Path(model_path).exists():
-                try:
-                    from modelscope import snapshot_download
-                    print(f"[ModelManager] 尝试从 ModelScope 下载模型: {model_path}")
-                    token = os.getenv("MODELSCOPE_TOKEN") or os.getenv("DASHSCOPE_API_KEY")
-                    if token:
-                        os.environ["MODELSCOPE_TOKEN"] = token
-                    
-                    cache_dir = os.getenv("MODELSCOPE_CACHE") or os.getenv("HF_HOME") or str(Path.home() / ".cache" / "modelscope" / "hub")
-                    downloaded_path = snapshot_download(
-                        model_id=model_path,
-                        cache_dir=cache_dir,
-                        revision="master",
-                    )
-                    model_path = downloaded_path
-                    print(f"[ModelManager] 模型已下载到: {model_path}")
-                except ImportError:
-                    print(f"[ModelManager] 错误: 需要安装 modelscope 库")
-                    print(f"[ModelManager] 请运行: pip install modelscope")
-                    raise
-                except Exception as e:
-                    print(f"[ModelManager] 从 ModelScope 下载失败: {e}")
-                    print(f"[ModelManager] 请确保模型已下载到本地路径或设置正确的 ModelScope token")
-                    raise
+                raise FileNotFoundError(
+                    f"模型路径不存在: {model_path}\n"
+                    f"请确保模型已下载，或运行: python scripts/download_models.py --all-8b"
+                )
             
             self._llm_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
             if self._llm_tokenizer.pad_token is None:
@@ -194,31 +203,12 @@ class ModelManager:
             
             print(f"[ModelManager] Loading Guard: {model_path} (dtype: {torch_dtype})")
             
-            # 如果是 ModelScope ID 且路径不存在，尝试使用 ModelScope 下载
+            # 检查路径是否存在
             if "/" in model_path and not Path(model_path).exists():
-                try:
-                    from modelscope import snapshot_download
-                    print(f"[ModelManager] 尝试从 ModelScope 下载模型: {model_path}")
-                    token = os.getenv("MODELSCOPE_TOKEN") or os.getenv("DASHSCOPE_API_KEY")
-                    if token:
-                        os.environ["MODELSCOPE_TOKEN"] = token
-                    
-                    cache_dir = os.getenv("MODELSCOPE_CACHE") or os.getenv("HF_HOME") or str(Path.home() / ".cache" / "modelscope" / "hub")
-                    downloaded_path = snapshot_download(
-                        model_id=model_path,
-                        cache_dir=cache_dir,
-                        revision="master",
-                    )
-                    model_path = downloaded_path
-                    print(f"[ModelManager] 模型已下载到: {model_path}")
-                except ImportError:
-                    print(f"[ModelManager] 错误: 需要安装 modelscope 库")
-                    print(f"[ModelManager] 请运行: pip install modelscope")
-                    raise
-                except Exception as e:
-                    print(f"[ModelManager] 从 ModelScope 下载失败: {e}")
-                    print(f"[ModelManager] 请确保模型已下载到本地路径或设置正确的 ModelScope token")
-                    raise
+                raise FileNotFoundError(
+                    f"模型路径不存在: {model_path}\n"
+                    f"请确保模型已下载，或运行: python scripts/download_models.py --all-8b"
+                )
             
             self._guard_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
             if self._guard_tokenizer.pad_token is None:
