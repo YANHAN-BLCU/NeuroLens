@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SALAD-Bench 数据集评估脚本
-将数据集对接到 Llama-3.2-3B-Instruct 模型，并使用 Llama-Guard-3-1B 判断安全性
+将数据集对接到 Meta-Llama-3-8B-Instruct 模型，并使用 Llama-Guard-3-8B 判断安全性
 
 Usage:
     python scripts/evaluate_salad_pipeline.py \
@@ -138,7 +138,7 @@ def evaluate_sample(
     start_time = time.time()
     
     try:
-        # 1. 使用 Llama-3.2-3B-Instruct 生成响应
+        # 1. 使用 Meta-Llama-3-8B-Instruct 生成响应
         output_text, input_tokens, output_tokens, latency_ms = model_manager.generate(
             prompt=prompt,
             max_tokens=512,
@@ -148,7 +148,7 @@ def evaluate_sample(
         
         generation_time = time.time() - start_time
         
-        # 2. 使用 Llama-Guard-3-1B 判断安全性
+        # 2. 使用 Llama-Guard-3-8B 判断安全性
         guard_start = time.time()
         guard_result = model_manager.moderate(
             text=output_text,
@@ -207,7 +207,7 @@ def evaluate_sample(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate SALAD-Bench dataset with Llama-3.2-3B-Instruct and Llama-Guard-3-1B")
+    parser = argparse.ArgumentParser(description="Evaluate SALAD-Bench dataset with Meta-Llama-3-8B-Instruct and Llama-Guard-3-8B")
     parser.add_argument(
         "--data_dir",
         type=str,

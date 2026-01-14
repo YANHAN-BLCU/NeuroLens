@@ -16,19 +16,19 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-# 默认推理模型切换为 Instruct 版本
-LLM_ID = "meta-llama/Llama-3.2-3B-Instruct"
-GUARD_ID = "meta-llama/Llama-Guard-3-1B"
+# 默认推理模型：8B 版本（ModelScope）
+LLM_ID = "LLM-Research/Meta-Llama-3-8B-Instruct"
+GUARD_ID = "LLM-Research/Llama-Guard-3-8B"
 
-# 模型路径配置：优先使用本地路径（/cache/），如果不存在则使用HuggingFace ID
-LLM_LOCAL_PATH = os.getenv("LLM_LOCAL_PATH", "F:/models/meta-llama_Llama-3.2-3B-Instruct")
-GUARD_LOCAL_PATH = os.getenv("GUARD_LOCAL_PATH", "F:/models/meta-llama_Llama-Guard-3-1B")
+# 模型路径配置：优先使用本地路径（/cache/），如果不存在则使用 ModelScope ID
+LLM_LOCAL_PATH = os.getenv("LLM_LOCAL_PATH", "F:/models/Meta-Llama-3-8B-Instruct")
+GUARD_LOCAL_PATH = os.getenv("GUARD_LOCAL_PATH", "F:/models/Llama-Guard-3-8B")
 # Docker容器内路径（优先检查 /cache，这是当前容器的挂载点）
-LLM_CONTAINER_PATH = os.getenv("LLM_CONTAINER_PATH", "/cache/meta-llama_Llama-3.2-3B-Instruct")
-GUARD_CONTAINER_PATH = os.getenv("GUARD_CONTAINER_PATH", "/cache/meta-llama_Llama-Guard-3-1B")
-# 备用路径
-LLM_WORKSPACE_PATH = "/workspace/hf_models/meta-llama_Llama-3.2-3B-Instruct"
-GUARD_WORKSPACE_PATH = "/workspace/hf_models/meta-llama_Llama-Guard-3-1B"
+LLM_CONTAINER_PATH = os.getenv("LLM_CONTAINER_PATH", "/cache/Meta-Llama-3-8B-Instruct")
+GUARD_CONTAINER_PATH = os.getenv("GUARD_CONTAINER_PATH", "/cache/Llama-Guard-3-8B")
+# 备用路径（ms_models 目录）
+LLM_WORKSPACE_PATH = "/workspace/ms_models/Meta-Llama-3-8B-Instruct"
+GUARD_WORKSPACE_PATH = "/workspace/ms_models/Llama-Guard-3-8B"
 
 
 def resolve_dtype() -> torch.dtype:
@@ -42,16 +42,16 @@ def resolve_dtype() -> torch.dtype:
 
 def get_model_path(model_id: str, local_path: str, container_path: str, workspace_path: str = "") -> str:
     """
-    获取模型路径：优先使用本地路径，如果不存在则使用HuggingFace ID
+    获取模型路径：优先使用本地路径，如果不存在则使用 ModelScope ID
     
     Args:
-        model_id: HuggingFace模型ID
+        model_id: ModelScope模型ID
         local_path: Windows本地路径（F盘）
         container_path: Docker容器内路径（主要）
         workspace_path: Docker容器内备用路径
     
     Returns:
-        模型路径（本地路径、容器路径或HuggingFace ID）
+        模型路径（本地路径、容器路径或 ModelScope ID）
     """
     container_path_obj = Path(container_path)
     local_path_obj = Path(local_path)
@@ -88,7 +88,7 @@ def get_model_path(model_id: str, local_path: str, container_path: str, workspac
                     return str(item)
     
     # 否则使用HuggingFace ID
-    print(f"[ModelManager] 本地路径不存在，将使用HuggingFace ID: {model_id}")
+    print(f"[ModelManager] 本地路径不存在，将使用 ModelScope ID: {model_id}")
     return model_id
 
 

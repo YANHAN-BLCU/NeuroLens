@@ -1,20 +1,21 @@
 # SALAD-Bench 评估指南
 
-本指南说明如何使用 Llama-3.2-3B-Instruct 和 Llama-Guard-3-1B 评估 SALAD-Bench 数据集。
+本指南说明如何使用 Meta-Llama-3-8B-Instruct 和 Llama-Guard-3-8B 评估 SALAD-Bench 数据集。
 
 ## 概述
 
 评估流程：
 1. 从 SALAD-Bench 数据集加载样本
-2. 使用 Llama-3.2-3B-Instruct 生成响应
-3. 使用 Llama-Guard-3-1B 判断响应安全性
+2. 使用 Meta-Llama-3-8B-Instruct 生成响应
+3. 使用 Llama-Guard-3-8B 判断响应安全性
 4. 生成包含所有信息的联合输出文件
 
 ## 前置要求
 
 1. **数据集已下载**：确保 SALAD-Bench 数据已下载到 `data/salad/raw/`
-2. **模型已准备**：确保模型在容器内可用（`/cache/` 或 `/workspace/models/`）
+2. **模型已准备**：确保 8B 模型在容器内可用（`/cache/` 或 `/workspace/ms_models/`）
 3. **Docker 容器运行中**：确保 `neurobreak-container` 容器正在运行
+4. **GPU 要求**：8B 模型需要足够的 GPU 显存（建议 16GB+ VRAM）
 
 ## 使用方法
 
@@ -157,18 +158,19 @@ python scripts/evaluate_salad_pipeline.py \
 
 ## 注意事项
 
-1. **显存要求**：确保有足够的 GPU 显存（建议至少 16GB）
-2. **时间消耗**：评估大量样本可能需要较长时间
+1. **显存要求**：8B 模型需要足够的 GPU 显存（建议至少 16GB VRAM）
+2. **时间消耗**：评估大量样本可能需要较长时间，8B 模型推理速度较慢
 3. **输出文件**：脚本会增量写入，即使中断也不会丢失已处理的数据
-4. **模型路径**：脚本会自动检测容器内的模型路径（`/cache/` 或 `/workspace/models/`）
+4. **模型路径**：脚本会自动检测容器内的模型路径（`/cache/` 或 `/workspace/ms_models/`）
 
 ## 故障排除
 
 ### 模型未找到
 
 如果出现模型加载错误，检查：
-1. 模型是否在 `/cache/` 或 `/workspace/models/` 目录
+1. 模型是否在 `/cache/` 或 `/workspace/ms_models/` 目录
 2. 环境变量是否正确设置
+3. 模型文件是否完整（8B 模型约 16GB+）
 
 ### 数据文件未找到
 
