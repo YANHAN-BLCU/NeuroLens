@@ -252,14 +252,38 @@ class ModelManager:
                         bnb_4bit_quant_type="nf4"
                     )
                     print("[ModelManager] 使用 4bit 量化加载 LLM 模型...")
-                    self._llm_model = AutoModelForCausalLM.from_pretrained(
-                        model_path,
-                        quantization_config=quantization_config,
-                        device_map="auto",
-                        trust_remote_code=True,
-                    )
-                    self._llm_model.eval()
-                    print("[ModelManager] LLM 模型已使用 4bit 量化加载")
+                    # 清理显存以确保有足够空间
+                    torch.cuda.empty_cache()
+                    try:
+                        # 使用自定义 device_map 确保模型在 GPU 上
+                        self._llm_model = AutoModelForCausalLM.from_pretrained(
+                            model_path,
+                            quantization_config=quantization_config,
+                            device_map={"": 0},  # 所有模块都放在 GPU 0 上
+                            trust_remote_code=True,
+                        )
+                        self._llm_model.eval()
+                        print("[ModelManager] LLM 模型已使用 4bit 量化加载")
+                    except ValueError as e:
+                        if "dispatched on the CPU or the disk" in str(e):
+                            print("[ModelManager] 警告: GPU 显存不足，无法完全加载量化模型到 GPU")
+                            print("[ModelManager] 回退到常规加载方式...")
+                            # 回退到常规加载
+                            self._llm_model = AutoModelForCausalLM.from_pretrained(
+                                model_path,
+                                torch_dtype=torch_dtype,
+                                device_map=None,
+                                trust_remote_code=True,
+                            )
+                            # 尝试加载到 GPU，如果失败则使用 CPU
+                            try:
+                                self._llm_model = self._llm_model.to(device)
+                            except RuntimeError:
+                                print("[ModelManager] GPU 显存不足，使用 CPU")
+                                self._llm_model = self._llm_model.to(torch.device("cpu"))
+                            self._llm_model.eval()
+                        else:
+                            raise
                 except ImportError:
                     print("[ModelManager] 警告: bitsandbytes 未安装，使用常规加载方式")
                     # 回退到常规加载
@@ -340,14 +364,34 @@ class ModelManager:
                         bnb_4bit_quant_type="nf4"
                     )
                     print("[ModelManager] 使用 4bit 量化加载 Guard 模型...")
-                    self._guard_model = AutoModelForCausalLM.from_pretrained(
-                        model_path,
-                        quantization_config=quantization_config,
-                        device_map="auto",
-                        trust_remote_code=True,
-                    )
-                    self._guard_model.eval()
-                    print("[ModelManager] Guard 模型已使用 4bit 量化加载")
+                    # 清理显存以确保有足够空间
+                    torch.cuda.empty_cache()
+                    try:
+                        # 使用自定义 device_map 确保模型在 GPU 上
+                        self._guard_model = AutoModelForCausalLM.from_pretrained(
+                            model_path,
+                            quantization_config=quantization_config,
+                            device_map={"": 0},  # 所有模块都放在 GPU 0 上
+                            trust_remote_code=True,
+                        )
+                        self._guard_model.eval()
+                        print("[ModelManager] Guard 模型已使用 4bit 量化加载")
+                    except ValueError as e:
+                        if "dispatched on the CPU or the disk" in str(e):
+                            print("[ModelManager] 警告: GPU 显存不足，Guard 模型将使用 CPU")
+                            # 在 CPU 上加载
+                            device = torch.device("cpu")
+                            self._guard_model = AutoModelForCausalLM.from_pretrained(
+                                model_path,
+                                torch_dtype=torch_dtype,
+                                device_map=None,
+                                trust_remote_code=True,
+                            )
+                            self._guard_model = self._guard_model.to(device)
+                            self._guard_model.eval()
+                            print("[ModelManager] Guard 已加载到 CPU")
+                        else:
+                            raise
                 except ImportError:
                     print("[ModelManager] 警告: bitsandbytes 未安装，使用常规加载方式")
                     # 回退到常规加载，检查显存
