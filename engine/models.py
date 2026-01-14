@@ -259,6 +259,13 @@ class ModelManager:
             # 验证设备
             actual_device = next(self._llm_model.parameters()).device
             print(f"[ModelManager] LLM 已加载到设备: {actual_device}")
+            
+            # 清理显存缓存，为后续模型加载做准备
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
+                print(f"[ModelManager] LLM 占用显存: {allocated:.2f} GB")
+            
             print("[ModelManager] LLM loaded successfully")
         return self._llm_tokenizer, self._llm_model
 
@@ -288,29 +295,60 @@ class ModelManager:
             if self._guard_tokenizer.pad_token is None:
                 self._guard_tokenizer.pad_token = self._guard_tokenizer.eos_token
 
-            # 确定设备：优先使用 GPU
+            # 确定设备：检查显存是否足够
             if torch.cuda.is_available():
-                device = torch.device("cuda:0")
-                print(f"[ModelManager] 使用 GPU: {torch.cuda.get_device_name(0)}")
+                # 检查当前显存使用情况
+                torch.cuda.empty_cache()  # 清理缓存
+                total_memory = torch.cuda.get_device_properties(0).total_memory
+                allocated = torch.cuda.memory_allocated(0)
+                free_memory = total_memory - allocated
+                free_memory_gb = free_memory / (1024 ** 3)
+                
+                print(f"[ModelManager] GPU 显存状态: 已用 {allocated / (1024**3):.2f} GB, 可用 {free_memory_gb:.2f} GB")
+                
+                # Guard 模型大约需要 2-3GB 显存，如果可用显存不足 3GB，使用 CPU
+                if free_memory_gb < 3.0:
+                    device = torch.device("cpu")
+                    print(f"[ModelManager] 警告: GPU 显存不足 ({free_memory_gb:.2f} GB < 3 GB)，Guard 模型将使用 CPU")
+                else:
+                    device = torch.device("cuda:0")
+                    print(f"[ModelManager] Guard 使用 GPU: {torch.cuda.get_device_name(0)}")
             else:
                 device = torch.device("cpu")
                 print("[ModelManager] 警告: CUDA 不可用，使用 CPU")
             
             # 加载模型到指定设备
-            self._guard_model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch_dtype,
-                device_map=None,  # 不使用 device_map，手动控制设备
-                trust_remote_code=True,
-            )
-            # 明确移动到 GPU
-            self._guard_model = self._guard_model.to(device)
-            self._guard_model.eval()
-            
-            # 验证设备
-            actual_device = next(self._guard_model.parameters()).device
-            print(f"[ModelManager] Guard 已加载到设备: {actual_device}")
-            print("[ModelManager] Guard loaded successfully")
+            try:
+                self._guard_model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    device_map=None,  # 不使用 device_map，手动控制设备
+                    trust_remote_code=True,
+                )
+                # 移动到指定设备
+                self._guard_model = self._guard_model.to(device)
+                self._guard_model.eval()
+                
+                # 验证设备
+                actual_device = next(self._guard_model.parameters()).device
+                print(f"[ModelManager] Guard 已加载到设备: {actual_device}")
+                print("[ModelManager] Guard loaded successfully")
+            except RuntimeError as e:
+                if "out of memory" in str(e).lower():
+                    print(f"[ModelManager] GPU 显存不足，尝试在 CPU 上加载 Guard 模型...")
+                    torch.cuda.empty_cache()
+                    device = torch.device("cpu")
+                    self._guard_model = AutoModelForCausalLM.from_pretrained(
+                        model_path,
+                        torch_dtype=torch_dtype,
+                        device_map=None,
+                        trust_remote_code=True,
+                    )
+                    self._guard_model = self._guard_model.to(device)
+                    self._guard_model.eval()
+                    print(f"[ModelManager] Guard 已加载到 CPU（GPU 显存不足）")
+                else:
+                    raise
         return self._guard_tokenizer, self._guard_model
 
     def generate(
