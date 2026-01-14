@@ -21,3 +21,4 @@ ruff==0.6.9
 black==24.10.0
 isort==5.13.2
 modelscope>=1.9.0
+bitsandbytes>=0.41.0

@@ -241,24 +241,55 @@ class ModelManager:
                 device = torch.device("cuda:0")
                 print(f"[ModelManager] 使用 GPU: {torch.cuda.get_device_name(0)}")
                 print(f"[ModelManager] GPU 显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+                
+                # 使用 4bit 量化加载模型
+                try:
+                    from transformers import BitsAndBytesConfig
+                    quantization_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch_dtype,
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_quant_type="nf4"
+                    )
+                    print("[ModelManager] 使用 4bit 量化加载 LLM 模型...")
+                    self._llm_model = AutoModelForCausalLM.from_pretrained(
+                        model_path,
+                        quantization_config=quantization_config,
+                        device_map="auto",
+                        trust_remote_code=True,
+                    )
+                    self._llm_model.eval()
+                    print("[ModelManager] LLM 模型已使用 4bit 量化加载")
+                except ImportError:
+                    print("[ModelManager] 警告: bitsandbytes 未安装，使用常规加载方式")
+                    # 回退到常规加载
+                    self._llm_model = AutoModelForCausalLM.from_pretrained(
+                        model_path,
+                        torch_dtype=torch_dtype,
+                        device_map=None,
+                        trust_remote_code=True,
+                    )
+                    self._llm_model = self._llm_model.to(device)
+                    self._llm_model.eval()
             else:
                 device = torch.device("cpu")
                 print("[ModelManager] 警告: CUDA 不可用，使用 CPU")
+                self._llm_model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    device_map=None,
+                    trust_remote_code=True,
+                )
+                self._llm_model = self._llm_model.to(device)
+                self._llm_model.eval()
             
-            # 加载模型到指定设备
-            self._llm_model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch_dtype,
-                device_map=None,  # 不使用 device_map，手动控制设备
-                trust_remote_code=True,
-            )
-            # 明确移动到 GPU
-            self._llm_model = self._llm_model.to(device)
-            self._llm_model.eval()
-            
-            # 验证设备
-            actual_device = next(self._llm_model.parameters()).device
-            print(f"[ModelManager] LLM 已加载到设备: {actual_device}")
+            # 验证设备（4bit量化模型的参数可能分散在多个设备上）
+            try:
+                actual_device = next(self._llm_model.parameters()).device
+                print(f"[ModelManager] LLM 已加载到设备: {actual_device}")
+            except (StopIteration, AttributeError):
+                # 如果模型使用了device_map="auto"或量化，可能无法直接访问参数
+                print("[ModelManager] LLM 已使用量化加载到 GPU")
             
             # 清理显存缓存，为后续模型加载做准备
             if torch.cuda.is_available():
@@ -295,49 +326,42 @@ class ModelManager:
             if self._guard_tokenizer.pad_token is None:
                 self._guard_tokenizer.pad_token = self._guard_tokenizer.eos_token
 
-            # 确定设备：检查显存是否足够
+            # 确定设备：使用 GPU 加载（4bit 量化后显存足够）
             if torch.cuda.is_available():
-                # 检查当前显存使用情况
-                torch.cuda.empty_cache()  # 清理缓存
-                total_memory = torch.cuda.get_device_properties(0).total_memory
-                allocated = torch.cuda.memory_allocated(0)
-                free_memory = total_memory - allocated
-                free_memory_gb = free_memory / (1024 ** 3)
+                print(f"[ModelManager] Guard 使用 GPU: {torch.cuda.get_device_name(0)}")
                 
-                print(f"[ModelManager] GPU 显存状态: 已用 {allocated / (1024**3):.2f} GB, 可用 {free_memory_gb:.2f} GB")
-                
-                # Guard 模型大约需要 2-3GB 显存，如果可用显存不足 3GB，使用 CPU
-                if free_memory_gb < 3.0:
-                    device = torch.device("cpu")
-                    print(f"[ModelManager] 警告: GPU 显存不足 ({free_memory_gb:.2f} GB < 3 GB)，Guard 模型将使用 CPU")
-                else:
-                    device = torch.device("cuda:0")
-                    print(f"[ModelManager] Guard 使用 GPU: {torch.cuda.get_device_name(0)}")
-            else:
-                device = torch.device("cpu")
-                print("[ModelManager] 警告: CUDA 不可用，使用 CPU")
-            
-            # 加载模型到指定设备
-            try:
-                self._guard_model = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    torch_dtype=torch_dtype,
-                    device_map=None,  # 不使用 device_map，手动控制设备
-                    trust_remote_code=True,
-                )
-                # 移动到指定设备
-                self._guard_model = self._guard_model.to(device)
-                self._guard_model.eval()
-                
-                # 验证设备
-                actual_device = next(self._guard_model.parameters()).device
-                print(f"[ModelManager] Guard 已加载到设备: {actual_device}")
-                print("[ModelManager] Guard loaded successfully")
-            except RuntimeError as e:
-                if "out of memory" in str(e).lower():
-                    print(f"[ModelManager] GPU 显存不足，尝试在 CPU 上加载 Guard 模型...")
+                # 使用 4bit 量化加载模型
+                try:
+                    from transformers import BitsAndBytesConfig
+                    quantization_config = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_compute_dtype=torch_dtype,
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_quant_type="nf4"
+                    )
+                    print("[ModelManager] 使用 4bit 量化加载 Guard 模型...")
+                    self._guard_model = AutoModelForCausalLM.from_pretrained(
+                        model_path,
+                        quantization_config=quantization_config,
+                        device_map="auto",
+                        trust_remote_code=True,
+                    )
+                    self._guard_model.eval()
+                    print("[ModelManager] Guard 模型已使用 4bit 量化加载")
+                except ImportError:
+                    print("[ModelManager] 警告: bitsandbytes 未安装，使用常规加载方式")
+                    # 回退到常规加载，检查显存
                     torch.cuda.empty_cache()
-                    device = torch.device("cpu")
+                    total_memory = torch.cuda.get_device_properties(0).total_memory
+                    allocated = torch.cuda.memory_allocated(0)
+                    free_memory_gb = (total_memory - allocated) / (1024 ** 3)
+                    
+                    if free_memory_gb < 3.0:
+                        device = torch.device("cpu")
+                        print(f"[ModelManager] 警告: GPU 显存不足 ({free_memory_gb:.2f} GB < 3 GB)，Guard 模型将使用 CPU")
+                    else:
+                        device = torch.device("cuda:0")
+                    
                     self._guard_model = AutoModelForCausalLM.from_pretrained(
                         model_path,
                         torch_dtype=torch_dtype,
@@ -346,9 +370,49 @@ class ModelManager:
                     )
                     self._guard_model = self._guard_model.to(device)
                     self._guard_model.eval()
-                    print(f"[ModelManager] Guard 已加载到 CPU（GPU 显存不足）")
-                else:
-                    raise
+                except RuntimeError as e:
+                    if "out of memory" in str(e).lower():
+                        print(f"[ModelManager] GPU 显存不足，尝试在 CPU 上加载 Guard 模型...")
+                        torch.cuda.empty_cache()
+                        device = torch.device("cpu")
+                        self._guard_model = AutoModelForCausalLM.from_pretrained(
+                            model_path,
+                            torch_dtype=torch_dtype,
+                            device_map=None,
+                            trust_remote_code=True,
+                        )
+                        self._guard_model = self._guard_model.to(device)
+                        self._guard_model.eval()
+                        print(f"[ModelManager] Guard 已加载到 CPU（GPU 显存不足）")
+                    else:
+                        raise
+            else:
+                device = torch.device("cpu")
+                print("[ModelManager] 警告: CUDA 不可用，使用 CPU")
+                self._guard_model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    device_map=None,
+                    trust_remote_code=True,
+                )
+                self._guard_model = self._guard_model.to(device)
+                self._guard_model.eval()
+            
+            # 验证设备（4bit量化模型的参数可能分散在多个设备上）
+            try:
+                actual_device = next(self._guard_model.parameters()).device
+                print(f"[ModelManager] Guard 已加载到设备: {actual_device}")
+            except (StopIteration, AttributeError):
+                # 如果模型使用了device_map="auto"或量化，可能无法直接访问参数
+                print("[ModelManager] Guard 已使用量化加载到 GPU")
+            
+            # 显示显存使用情况
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
+                print(f"[ModelManager] Guard 占用显存: {allocated:.2f} GB")
+            
+            print("[ModelManager] Guard loaded successfully")
         return self._guard_tokenizer, self._guard_model
 
     def generate(
@@ -370,16 +434,15 @@ class ModelManager:
         """
         tokenizer, model = self.load_llm()
         
-        # 确定设备：优先使用 GPU
-        if torch.cuda.is_available():
-            # 获取模型的主要设备（通常是第一个参数所在的设备）
+        # 确定设备：获取模型实际所在的设备
+        try:
             device = next(model.parameters()).device
-            if device.type != "cuda":
-                # 如果模型不在 GPU 上，尝试找到 GPU 设备
+        except (StopIteration, AttributeError):
+            # 对于使用device_map="auto"的量化模型，默认使用GPU
+            if torch.cuda.is_available():
                 device = torch.device("cuda:0")
-                print(f"[ModelManager] 警告: 模型不在 GPU 上，尝试使用设备: {device}")
-        else:
-            device = torch.device("cpu")
+            else:
+                device = torch.device("cpu")
         
         # 构建完整提示
         if system_prompt:
@@ -467,16 +530,8 @@ class ModelManager:
         """
         tokenizer, model = self.load_guard()
         
-        # 确定设备：优先使用 GPU
-        if torch.cuda.is_available():
-            # 获取模型的主要设备（通常是第一个参数所在的设备）
-            device = next(model.parameters()).device
-            if device.type != "cuda":
-                # 如果模型不在 GPU 上，尝试找到 GPU 设备
-                device = torch.device("cuda:0")
-                print(f"[ModelManager] 警告: Guard 模型不在 GPU 上，尝试使用设备: {device}")
-        else:
-            device = torch.device("cpu")
+        # 获取模型实际所在的设备
+        device = next(model.parameters()).device
 
         prompt = self.format_guard_prompt(text)
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
@@ -485,9 +540,7 @@ class ModelManager:
             output_ids = model.generate(
                 **inputs,
                 max_new_tokens=128,
-                temperature=0.1,
-                top_p=0.8,
-                do_sample=False,
+                do_sample=False,  # 使用贪心解码，不需要 temperature 和 top_p
                 eos_token_id=tokenizer.eos_token_id,
                 pad_token_id=tokenizer.pad_token_id,
                 use_cache=True,  # 启用 KV cache 加速
