@@ -1,10 +1,10 @@
-# NeuroBreak-Reproduction
+# NeuroLens
 
 一个集成了 Llama 推理模型和 Llama Guard 安全审核的 AI 应用系统，提供完整的 Web 界面和 API 服务。
 
 ## ✨ 功能特性
 
-- 🤖 **智能推理**：基于 Meta Llama 3.2 模型进行文本生成和对话
+- 🤖 **智能推理**：基于 Meta Llama 3 8B 模型进行文本生成和对话
 - 🛡️ **安全审核**：集成 Llama Guard 3 进行内容安全检测和过滤
 - 🧪 **SALAD 评估**：支持 SALAD-Bench 数据集评估，测试模型安全防护能力
 - 🎨 **现代化前端**：基于 React + TypeScript + Vite 构建的响应式 Web 界面
@@ -37,11 +37,11 @@
 
 - Python 3.9+
 - Node.js 18+ (用于前端开发)
-- CUDA 11.8+ (推荐，用于 GPU 加速)
+- CUDA 12.4+ (推荐，用于 GPU 加速，8B 模型需要)
 - Docker (可选，用于容器化部署)
 - ModelScope 账号（推荐，中国大陆访问更快）或 HuggingFace 账号，已申请模型访问权限
-  - ModelScope: `LLM-Research/Llama-3.2-3B-Instruct` 与 `LLM-Research/Llama-Guard-3-1B`
-  - HuggingFace: `meta-llama/Llama-3.2-3B-Instruct` 与 `meta-llama/Llama-Guard-3-1B`
+  - ModelScope: `LLM-Research/Meta-Llama-3-8B-Instruct` 与 `LLM-Research/Llama-Guard-3-8B`
+  - HuggingFace: `meta-llama/Meta-Llama-3-8B-Instruct` 与 `meta-llama/Llama-Guard-3-8B`
 
 ## 🚀 快速开始
 
@@ -78,15 +78,12 @@ MODEL_CACHE_DIR=/path/to/models
 使用提供的脚本下载模型：
 
 ```bash
-# 下载默认的 3B 模型（使用 ModelScope）
-python scripts/download_models.py --all
-
-# 下载 8B 模型
+# 下载默认的 8B 模型（使用 ModelScope）
 python scripts/download_models.py --all-8b
 
 # 设置 ModelScope token（如果需要）
 export MODELSCOPE_TOKEN=your_token
-python scripts/download_models.py --all
+python scripts/download_models.py --all-8b
 ```
 
 ### 5. 启动后端服务
@@ -140,7 +137,7 @@ docker run -it --gpus all \
 ```
 
 **注意**：
-- 模型路径已更新为 `/workspace/hf_models`，请确保正确挂载模型目录
+- 模型路径已更新为 `/workspace/ms_models`，请确保正确挂载模型目录
 - 推荐使用 ModelScope token（`MODELSCOPE_TOKEN`），中国大陆访问速度更快
 - 如果使用 HuggingFace，可设置 `HF_TOKEN` 环境变量
 
@@ -174,8 +171,8 @@ NeuroBreak-Reproduction/
 │   ├── analyze_salad_results.py # SALAD 结果分析脚本
 │   └── ...
 ├── hf_models/            # 模型文件目录
-│   ├── meta-llama_Llama-3.2-3B-Instruct/
-│   └── meta-llama_Llama-Guard-3-1B/
+│   ├── Meta-Llama-3-8B-Instruct/
+│   └── Llama-Guard-3-8B/
 ├── docker/                # Docker 配置
 │   └── Dockerfile
 ├── requirements.txt       # Python 依赖
@@ -199,14 +196,14 @@ Content-Type: application/json
 {
   "prompt": "用户输入文本",
   "inferenceConfig": {
-    "modelId": "meta-llama/Llama-3.2-3B-Instruct",
+    "modelId": "LLM-Research/Meta-Llama-3-8B-Instruct",
     "temperature": 0.7,
     "topP": 0.9,
     "maxTokens": 512,
     "stream": false
   },
   "guardConfig": {
-    "modelId": "meta-llama/Llama-Guard-3-1B",
+    "modelId": "LLM-Research/Llama-Guard-3-8B",
     "threshold": 0.7,
     "autoBlock": false,
     "categories": ["violence", "politics"]
@@ -311,12 +308,12 @@ python scripts/check_models.py
 1. **模型访问权限**：需要申请 Meta Llama 和 Llama Guard 模型的访问权限
    - ModelScope（推荐）：访问 https://modelscope.cn 申请模型权限
    - HuggingFace：访问 https://huggingface.co 申请模型权限
-2. **模型路径**：模型默认路径为 `/workspace/hf_models`（容器内）或 `hf_models/`（本地）
+2. **模型路径**：模型默认路径为 `/workspace/ms_models`（容器内）或 `hf_models/`（本地）
 3. **模型下载**：推荐使用 ModelScope 下载模型，中国大陆访问速度更快
-4. **GPU 推荐**：虽然可以在 CPU 上运行，但 GPU 会显著提升性能
-5. **首次加载**：模型首次加载需要较长时间，这是正常现象
-6. **内存要求**：建议至少 16GB RAM，使用 GPU 时建议 8GB+ VRAM
-7. **网络要求**：首次运行需要下载模型（约 10GB+），使用 ModelScope 可加速下载
+4. **GPU 推荐**：8B 模型需要 GPU 支持，建议使用 NVIDIA GPU（16GB+ VRAM）
+5. **首次加载**：8B 模型首次加载需要较长时间，这是正常现象
+6. **内存要求**：建议至少 32GB RAM，使用 GPU 时建议 16GB+ VRAM（8B 模型）
+7. **网络要求**：首次运行需要下载模型（约 16GB+），使用 ModelScope 可加速下载
 8. **SALAD 评估**：运行 SALAD 评估前需要先下载 SALAD-Bench 数据集
 
 ## 🤝 贡献
