@@ -83,7 +83,7 @@ curl -X POST http://localhost:8000/api/pipeline/run \
     },
     "guardConfig": {
       "modelId": "meta-llama/Llama-Guard-3-1B",
-      "threshold": 0.5,
+      "threshold": 0.7,
       "autoBlock": false,
       "categories": ["violence", "politics"]
     }
@@ -97,7 +97,7 @@ curl -X POST http://localhost:8000/api/moderate \
   -H "Content-Type: application/json" \
   -d '{
     "text": "这是一个测试文本",
-    "threshold": 0.5,
+    "threshold": 0.7,
     "categories": ["violence", "politics"]
   }'
 ```

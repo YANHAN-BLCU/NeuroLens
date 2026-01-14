@@ -21,7 +21,7 @@ export const defaultInferenceConfig: InferenceConfig = {
 
 export const defaultGuardConfig: GuardConfig = {
   modelId: MODEL_IDS.guard,
-  threshold: 0.65,
+  threshold: 0.7,
   autoBlock: true,
   categories: ["violence", "self-harm", "politics"],
 };
@@ -38,7 +38,7 @@ export const PRESETS: ParameterPreset[] = [
       maxTokens: 1024,
     },
     guardConfig: {
-      threshold: 0.65,
+      threshold: 0.7,
     },
   },
   {

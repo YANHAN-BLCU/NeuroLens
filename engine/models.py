@@ -253,7 +253,7 @@ class ModelManager:
     def moderate(
         self,
         text: str,
-        threshold: float = 0.5,
+        threshold: float = 0.7,
         categories: Optional[list[str]] = None,
     ) -> dict:
         """

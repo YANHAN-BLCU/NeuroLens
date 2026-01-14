@@ -30,8 +30,8 @@
 - **图表**：Recharts 3.5.0
 
 ### 部署
-- **容器化**：Docker + NVIDIA CUDA 11.8
-- **模型管理**：HuggingFace Transformers
+- **容器化**：Docker + NVIDIA CUDA 12.4
+- **模型管理**：ModelScope（推荐，中国大陆访问更快）或 HuggingFace Transformers
 
 ## 📋 前提条件
 
@@ -39,7 +39,9 @@
 - Node.js 18+ (用于前端开发)
 - CUDA 11.8+ (推荐，用于 GPU 加速)
 - Docker (可选，用于容器化部署)
-- HuggingFace 账号和访问令牌（需要申请 Llama 模型访问权限）
+- ModelScope 账号（推荐，中国大陆访问更快）或 HuggingFace 账号，已申请模型访问权限
+  - ModelScope: `LLM-Research/Llama-3.2-3B-Instruct` 与 `LLM-Research/Llama-Guard-3-1B`
+  - HuggingFace: `meta-llama/Llama-3.2-3B-Instruct` 与 `meta-llama/Llama-Guard-3-1B`
 
 ## 🚀 快速开始
 
@@ -61,10 +63,13 @@ pip install -r requirements.txt
 创建 `.env` 文件（或设置环境变量）：
 
 ```bash
-# HuggingFace Token
-HF_TOKEN=your_huggingface_token_here
+# ModelScope Token（推荐，中国大陆访问更快）
+MODELSCOPE_TOKEN=your_modelscope_token_here
 
-# 模型路径（可选，默认使用 HuggingFace 缓存）
+# 或者使用 HuggingFace Token
+# HF_TOKEN=your_huggingface_token_here
+
+# 模型路径（可选，默认使用 ModelScope/HuggingFace 缓存）
 MODEL_CACHE_DIR=/path/to/models
 ```
 
@@ -73,7 +78,15 @@ MODEL_CACHE_DIR=/path/to/models
 使用提供的脚本下载模型：
 
 ```bash
-python scripts/download_models.py
+# 下载默认的 3B 模型（使用 ModelScope）
+python scripts/download_models.py --all
+
+# 下载 8B 模型
+python scripts/download_models.py --all-8b
+
+# 设置 ModelScope token（如果需要）
+export MODELSCOPE_TOKEN=your_token
+python scripts/download_models.py --all
 ```
 
 ### 5. 启动后端服务
@@ -122,11 +135,14 @@ docker run -it --gpus all \
   -p 8000:8000 \
   -v /path/to/models:/cache \
   -v /path/to/workspace/hf_models:/workspace/hf_models \
-  -e HF_TOKEN=your_token \
+  -e MODELSCOPE_TOKEN=your_token \
   neurobreak:latest
 ```
 
-**注意**：模型路径已更新为 `/workspace/hf_models`，请确保正确挂载模型目录。
+**注意**：
+- 模型路径已更新为 `/workspace/hf_models`，请确保正确挂载模型目录
+- 推荐使用 ModelScope token（`MODELSCOPE_TOKEN`），中国大陆访问速度更快
+- 如果使用 HuggingFace，可设置 `HF_TOKEN` 环境变量
 
 详细部署指南请参考 [DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)。
 
@@ -191,7 +207,7 @@ Content-Type: application/json
   },
   "guardConfig": {
     "modelId": "meta-llama/Llama-Guard-3-1B",
-    "threshold": 0.5,
+    "threshold": 0.7,
     "autoBlock": false,
     "categories": ["violence", "politics"]
   }
@@ -206,7 +222,7 @@ Content-Type: application/json
 
 {
   "text": "待审核文本",
-  "threshold": 0.5,
+  "threshold": 0.7,
   "categories": ["violence", "politics"]
 }
 ```
@@ -293,12 +309,15 @@ python scripts/check_models.py
 ## ⚠️ 注意事项
 
 1. **模型访问权限**：需要申请 Meta Llama 和 Llama Guard 模型的访问权限
+   - ModelScope（推荐）：访问 https://modelscope.cn 申请模型权限
+   - HuggingFace：访问 https://huggingface.co 申请模型权限
 2. **模型路径**：模型默认路径为 `/workspace/hf_models`（容器内）或 `hf_models/`（本地）
-3. **GPU 推荐**：虽然可以在 CPU 上运行，但 GPU 会显著提升性能
-4. **首次加载**：模型首次加载需要较长时间，这是正常现象
-5. **内存要求**：建议至少 16GB RAM，使用 GPU 时建议 8GB+ VRAM
-6. **网络要求**：首次运行需要从 HuggingFace 下载模型（约 10GB+）
-7. **SALAD 评估**：运行 SALAD 评估前需要先下载 SALAD-Bench 数据集
+3. **模型下载**：推荐使用 ModelScope 下载模型，中国大陆访问速度更快
+4. **GPU 推荐**：虽然可以在 CPU 上运行，但 GPU 会显著提升性能
+5. **首次加载**：模型首次加载需要较长时间，这是正常现象
+6. **内存要求**：建议至少 16GB RAM，使用 GPU 时建议 8GB+ VRAM
+7. **网络要求**：首次运行需要下载模型（约 10GB+），使用 ModelScope 可加速下载
+8. **SALAD 评估**：运行 SALAD 评估前需要先下载 SALAD-Bench 数据集
 
 ## 🤝 贡献
 
@@ -311,6 +330,7 @@ python scripts/check_models.py
 ## 🙏 致谢
 
 - [Meta Llama](https://ai.meta.com/llama/) - 提供强大的语言模型
+- [ModelScope](https://modelscope.cn/) - 模型托管平台（中国大陆推荐）
 - [HuggingFace](https://huggingface.co/) - 模型托管和 Transformers 库
 - [FastAPI](https://fastapi.tiangolo.com/) - 现代 Python Web 框架
 - [React](https://react.dev/) - 前端 UI 框架

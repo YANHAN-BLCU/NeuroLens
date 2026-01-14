@@ -273,7 +273,7 @@ But now that we got that warning out of the way, [实际回答]
 - **推理模型**: Llama-3.2-3B-Instruct
 - **安全分类器**: Llama-Guard-3-1B
 - **生成参数**: max_tokens=512, temperature=0.7, top_p=0.9
-- **Guard 参数**: threshold=0.5
+- **Guard 参数**: threshold=0.7
 
 ### 数据文件位置
 

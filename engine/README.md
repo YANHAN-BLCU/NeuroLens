@@ -33,7 +33,7 @@
   },
   "guardConfig": {
     "modelId": "meta-llama/Llama-Guard-3-1B",
-    "threshold": 0.5,
+    "threshold": 0.7,
     "autoBlock": false,
     "categories": ["violence", "politics"]
   }
@@ -47,7 +47,7 @@
 ```json
 {
   "text": "待审核文本",
-  "threshold": 0.5,
+  "threshold": 0.7,
   "categories": ["violence", "politics"]
 }
 ```
