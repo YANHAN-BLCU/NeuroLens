@@ -262,13 +262,36 @@ class ModelManager:
             if self._llm_tokenizer.pad_token is None:
                 self._llm_tokenizer.pad_token = self._llm_tokenizer.eos_token
 
-            self._llm_model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch_dtype,
-                device_map="auto" if torch.cuda.is_available() else None,
-                trust_remote_code=True,
-            )
+            # 确保使用 GPU
+            if torch.cuda.is_available():
+                print(f"[ModelManager] 使用 GPU: {torch.cuda.get_device_name(0)}")
+                print(f"[ModelManager] GPU 显存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+                self._llm_model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    device_map="auto",  # 自动分配到 GPU
+                    trust_remote_code=True,
+                )
+            else:
+                print("[ModelManager] 警告: CUDA 不可用，使用 CPU")
+                self._llm_model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    trust_remote_code=True,
+                )
+            
             self._llm_model.eval()
+            
+            # 验证模型设备
+            if torch.cuda.is_available():
+                device_info = {}
+                for name, param in self._llm_model.named_parameters():
+                    if param.device.type == "cuda":
+                        device_info[name] = param.device
+                if device_info:
+                    print(f"[ModelManager] LLM 已加载到 GPU，参数设备: {list(device_info.values())[0]}")
+                else:
+                    print("[ModelManager] 警告: LLM 未检测到 GPU 参数，可能在使用 CPU")
             print("[ModelManager] LLM loaded successfully")
         return self._llm_tokenizer, self._llm_model
 
@@ -298,13 +321,35 @@ class ModelManager:
             if self._guard_tokenizer.pad_token is None:
                 self._guard_tokenizer.pad_token = self._guard_tokenizer.eos_token
 
-            self._guard_model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                torch_dtype=torch_dtype,
-                device_map="auto" if torch.cuda.is_available() else None,
-                trust_remote_code=True,
-            )
+            # 确保使用 GPU
+            if torch.cuda.is_available():
+                print(f"[ModelManager] 使用 GPU: {torch.cuda.get_device_name(0)}")
+                self._guard_model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    device_map="auto",  # 自动分配到 GPU
+                    trust_remote_code=True,
+                )
+            else:
+                print("[ModelManager] 警告: CUDA 不可用，使用 CPU")
+                self._guard_model = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    trust_remote_code=True,
+                )
+            
             self._guard_model.eval()
+            
+            # 验证模型设备
+            if torch.cuda.is_available():
+                device_info = {}
+                for name, param in self._guard_model.named_parameters():
+                    if param.device.type == "cuda":
+                        device_info[name] = param.device
+                if device_info:
+                    print(f"[ModelManager] Guard 已加载到 GPU，参数设备: {list(device_info.values())[0]}")
+                else:
+                    print("[ModelManager] 警告: Guard 未检测到 GPU 参数，可能在使用 CPU")
             print("[ModelManager] Guard loaded successfully")
         return self._guard_tokenizer, self._guard_model
 
@@ -326,8 +371,18 @@ class ModelManager:
             (output_text, input_tokens, output_tokens, latency_ms)
         """
         tokenizer, model = self.load_llm()
-        device = next(model.parameters()).device
-
+        
+        # 确定设备：优先使用 GPU
+        if torch.cuda.is_available():
+            # 获取模型的主要设备（通常是第一个参数所在的设备）
+            device = next(model.parameters()).device
+            if device.type != "cuda":
+                # 如果模型不在 GPU 上，尝试找到 GPU 设备
+                device = torch.device("cuda:0")
+                print(f"[ModelManager] 警告: 模型不在 GPU 上，尝试使用设备: {device}")
+        else:
+            device = torch.device("cpu")
+        
         # 构建完整提示
         if system_prompt:
             full_prompt = f"<|start_header_id|>system<|end_header_id|>\n{system_prompt}\n<|eot_id|><|start_header_id|>user<|end_header_id|>\n{prompt}\n<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
@@ -411,7 +466,17 @@ class ModelManager:
             GuardResult 格式的字典
         """
         tokenizer, model = self.load_guard()
-        device = next(model.parameters()).device
+        
+        # 确定设备：优先使用 GPU
+        if torch.cuda.is_available():
+            # 获取模型的主要设备（通常是第一个参数所在的设备）
+            device = next(model.parameters()).device
+            if device.type != "cuda":
+                # 如果模型不在 GPU 上，尝试找到 GPU 设备
+                device = torch.device("cuda:0")
+                print(f"[ModelManager] 警告: Guard 模型不在 GPU 上，尝试使用设备: {device}")
+        else:
+            device = torch.device("cpu")
 
         prompt = self.format_guard_prompt(text)
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
