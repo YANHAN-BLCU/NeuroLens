@@ -518,7 +518,7 @@ class ModelManager:
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        max_tokens: int = 512,
+        max_tokens: int = 384,
         temperature: float = 0.7,
         top_p: float = 0.9,
         top_k: int = 50,

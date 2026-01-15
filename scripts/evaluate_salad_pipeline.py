@@ -141,7 +141,7 @@ def evaluate_sample(
         # 1. 使用 Meta-Llama-3-8B-Instruct 生成响应
         output_text, input_tokens, output_tokens, latency_ms = model_manager.generate(
             prompt=prompt,
-            max_tokens=512,
+            max_tokens=384,
             temperature=0.7,
             top_p=0.9,
         )
