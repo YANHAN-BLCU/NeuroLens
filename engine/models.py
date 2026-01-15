@@ -601,8 +601,9 @@ class ModelManager:
         system_directive = (
             "You are Llama Guard, a safety classifier. "
             "Classify the user's request as SAFE or UNSAFE. "
-            "Only classify as UNSAFE if the content clearly violates safety guidelines (violence, hate speech, self-harm, illegal activities, explicit sexual content). "
-            "When in doubt, classify as SAFE to minimize false positives. "
+            "Be strict and cautious: classify as UNSAFE if there is any potential safety concern, "
+            "including violence, hate speech, self-harm, illegal activities, explicit sexual content, "
+            "or any content that could be harmful. When in doubt, classify as UNSAFE to prioritize safety. "
             "Return JSON in format: {\"verdict\": \"SAFE\"|\"UNSAFE\", \"reason\": \"<short explanation>\"}."
         )
         return (
@@ -616,7 +617,7 @@ class ModelManager:
     def moderate(
         self,
         text: str,
-        threshold: float = 0.75,
+        threshold: float = 0.6,
         categories: Optional[list[str]] = None,
     ) -> dict:
         """
@@ -694,9 +695,15 @@ class ModelManager:
                 # 确保不是 UNSAFE 的一部分
                 safe_idx = response_upper.find("SAFE")
                 unsafe_idx = response_upper.find("UNSAFE")
-                if unsafe_idx == -1 or (safe_idx != -1 and safe_idx < unsafe_idx):
-                    verdict_raw = "SAFE"
-                    reason = "Guard classified as SAFE"
+                # 更严格的判断：只有当明确是 SAFE 且没有 UNSAFE 时才接受
+                if unsafe_idx == -1 and safe_idx != -1:
+                    # 检查是否在 "UNSAFE" 之前明确出现 "SAFE"
+                    if safe_idx < unsafe_idx or unsafe_idx == -1:
+                        verdict_raw = "SAFE"
+                        reason = "Guard classified as SAFE"
+                    else:
+                        verdict_raw = "UNSAFE"
+                        reason = "Guard classified as UNSAFE (ambiguous response)"
                 else:
                     verdict_raw = "UNSAFE"
                     # 尝试提取原因文本
@@ -719,9 +726,9 @@ class ModelManager:
                     context = response[context_start:context_end].strip()
                     reason = f"Guard classified as UNSAFE: {context}"
             else:
-                # 默认情况：无法确定时，更保守地判断为 SAFE（减少误判）
-                verdict_raw = "SAFE"
-                reason = f"Guard response unclear, defaulting to SAFE: {response[:150]}"
+                # 默认情况：无法确定，但提供原始响应的一部分
+                verdict_raw = "UNSAFE"
+                reason = f"Guard response (unable to parse): {response[:150]}"
         
         # 确保 reason 不为空
         if not reason:
@@ -731,19 +738,19 @@ class ModelManager:
         is_safe = verdict_raw == "SAFE"
         
         # 计算风险分数（基于 verdict 和 threshold）
-        # 更保守的分数计算：减少误判率
+        # 更严格的风险分数计算，减少漏判率
         if is_safe:
-            risk_score = 0.2  # SAFE 时使用更低的分数
+            risk_score = 0.2  # SAFE 时使用低分数
         else:
-            # UNSAFE 时，使用更保守的分数计算
-            # 只有在非常确定时才给出高分
-            risk_score = min(threshold + 0.15, 0.85)  # 降低 UNSAFE 的默认分数
+            # UNSAFE 时，使用更高的分数以确保被标记
+            # 基础分数 = threshold + 0.25，最低 0.75
+            risk_score = max(threshold + 0.25, 0.75)
         
-        # 确定严重程度（更保守的判断逻辑）
+        # 确定严重程度（更严格的判断逻辑，降低阈值）
         if is_safe or risk_score < threshold:
             severity = "low"
             verdict = "allow"
-        elif risk_score < threshold + 0.1:  # 在阈值附近更宽松
+        elif risk_score < 0.75:  # 降低 flag 的阈值
             severity = "medium"
             verdict = "flag"
         else:
