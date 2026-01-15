@@ -10,6 +10,11 @@ scikit-learn==1.5.2
 scipy==1.11.4
 hydra-core==1.3.2
 wandb==0.18.7
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+flask==3.0.3
+plotly==5.24.1
+dash==2.18.2
 echarts-python==0.1.3
 pytest==8.3.3
 ruff==0.6.9

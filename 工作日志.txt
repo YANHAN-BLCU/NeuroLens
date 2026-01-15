@@ -1,0 +1,344 @@
+================================================================================
+                    NeuroLens 项目工作日志
+================================================================================
+
+本日志记录了项目自创建以来的所有重要更改，按日期顺序排列。
+
+================================================================================
+2025年11月28日 - 项目初始化
+================================================================================
+
+【提交】7abcd30 - Initial commit: NeuroBreak-Reproduction project
+- 项目初始提交，创建基础项目结构
+
+【提交】4dca4ae - docs: 添加项目 README 文档
+- 添加项目 README 文档
+
+【提交】6f03d87 - Initialize README with project details and setup
+- 添加 README，包含项目概述、功能特性和设置说明
+
+【提交】30a4109 - Initialize README with project details and setup
+- 添加 README，包含项目概述、功能特性和设置说明
+
+【提交】c3986f0 - Update requirements.txt
+- 更新 Python 依赖文件
+
+【提交】f2f7a40 - Update requirements.txt
+- 更新 Python 依赖文件
+
+【提交】12bf98b - Update Dockerfile
+- 更新 Docker 配置文件
+
+【提交】574b07d - Update Dockerfile
+- 更新 Docker 配置文件
+
+【提交】cba176d - Update README.md
+- 更新项目 README
+
+【提交】149c089 - Update README.md
+- 更新项目 README
+
+================================================================================
+2025年12月7日 - 模型配置更新
+================================================================================
+
+【提交】02f60e0 - fix: update model names and dependencies in download script and requirements
+- 修复下载脚本和依赖文件中的模型名称
+- 更新依赖配置
+
+================================================================================
+2026年1月12日 - SALAD 评估功能添加
+================================================================================
+
+【提交】4fadadf - feat: Add SALAD evaluation and fix GPU usage warnings
+- 添加 SALAD 评估功能
+- 修复 GPU 使用警告
+
+================================================================================
+2026年1月13日 - 模型路径更新和 SALAD 分析报告
+================================================================================
+
+【提交】72a32cb - Update model paths to workspace/hf_models and add SALAD evaluation analysis report
+- 修复模型路径配置：将工作空间路径从 /workspace/models 更新为 /workspace/hf_models
+- 修复 dtype 参数问题：在 AutoModelForCausalLM.from_pretrained() 中将 'dtype' 改为 'torch_dtype'
+- 添加全面的 SALAD 评估分析报告 (docs/SALAD_EVALUATION_ANALYSIS.md)
+- 添加 SALAD 结果分析脚本 (scripts/analyze_salad_results.py)
+- 更新 check_models.py 和 run_io_tests.py 中的模型路径检查
+
+【提交】a05a32f - Update model paths to workspace/hf_models and add SALAD evaluation analysis report
+- 修复模型路径配置：将工作空间路径从 /workspace/models 更新为 /workspace/hf_models
+- 修复 dtype 参数问题：在 AutoModelForCausalLM.from_pretrained() 中将 'dtype' 改为 'torch_dtype'
+- 添加全面的 SALAD 评估分析报告 (docs/SALAD_EVALUATION_ANALYSIS.md)
+- 添加 SALAD 结果分析脚本 (scripts/analyze_salad_results.py)
+- 更新 check_models.py 和 run_io_tests.py 中的模型路径检查
+
+【提交】705156e - docs: Update README with SALAD evaluation features and model path updates
+- 更新 README，添加 SALAD 评估功能和模型路径更新说明
+
+【提交】f3714cd - docs: Update README with SALAD evaluation features and model path updates
+- 更新 README，添加 SALAD 评估功能和模型路径更新说明
+
+================================================================================
+2026年1月14日 - ModelScope 支持和模型管理优化
+================================================================================
+
+【提交】66e2e73 - chore: Add model files to .gitignore to prevent committing large files
+- 将模型文件添加到 .gitignore，防止提交大文件
+
+【提交】89bc62e - chore: Add model files to .gitignore to prevent committing large files
+- 将模型文件添加到 .gitignore，防止提交大文件
+
+【提交】c682f60 - Merge branch 'master'
+- 合并 master 分支
+
+【提交】a85d066 - Merge branch 'master'
+- 合并 master 分支
+
+【提交】be267fc - chore: Remove model files from Git tracking to prevent committing large files
+- 从 Git 跟踪中移除模型文件，防止提交大文件
+
+【提交】70011e0 - docs: Update README to reflect ModelScope support and correct model IDs
+- 更新 README，反映 ModelScope 支持和正确的模型 ID
+
+【提交】2bb42c7 - feat: Add ModelScope support and model removal scripts
+- 更新 download_models.py 以使用 ModelScope 而不是 HuggingFace
+- 添加对 8B 模型的支持 (LLM-Research/Meta-Llama-3-8B-Instruct, LLM-Research/Llama-Guard-3-8B)
+- 添加用于本地和 Docker 环境的模型删除脚本
+- 更新 Dockerfile 和容器脚本以支持 ModelScope
+- 更新文档，包含 ModelScope 使用说明
+- 将阈值默认值从 0.5 更新为 0.7
+
+【提交】7633513 - chore: Remove model files from Git tracking (already removed from history)
+- 从 Git 跟踪中移除模型文件（已从历史记录中移除）
+
+【提交】1826419 - docs: Update README to use 8B models as default (Meta-Llama-3-8B-Instruct and Llama-Guard-3-8B)
+- 更新 README，使用 8B 模型作为默认模型
+
+================================================================================
+2026年1月15日 - 模型优化和系统重构
+================================================================================
+
+【提交】1615234 - 更新 SALAD 评估：使用 8B 模型并切换到 ms_models 目录
+- 更新 SALAD_EVALUATION_GUIDE.md：使用 Meta-Llama-3-8B-Instruct 和 Llama-Guard-3-8B
+- 更新 evaluate_salad_pipeline.py：更新模型引用和描述
+- 更新 engine/models.py：切换到 8B 模型和 ModelScope ID，路径改为 ms_models
+- 更新 check_models.py：更新模型路径配置为 8B 版本和 ms_models 目录
+
+【提交】1823bd7 - 更新 .gitignore：添加 ms_models 目录的忽略规则
+- 添加 ms_models/**/*.safetensors
+- 添加 ms_models/**/*.pth
+- 添加 ms_models/**/original/*.pth
+- 防止大型模型文件被提交到 Git
+
+【提交】6aa421b - fix: Support ModelScope model loading with auto-download and cache check
+- 支持 ModelScope 模型加载，包含自动下载和缓存检查
+
+【提交】ea0407d - fix: Remove auto-download and improve model path detection
+- 移除自动下载功能，改进模型路径检测
+
+【提交】b2050c8 - fix: Improve model path detection to prioritize /workspace/ms_models
+- 重新排序路径检查，优先检查工作空间路径的父目录
+- 添加对 /workspace/ms_models 目录的直接检查
+- 改进模型名称匹配，使用更灵活的模式
+- 确保在检查缓存之前找到 /workspace/ms_models 中的模型
+
+【提交】2495710 - fix: Add detailed debugging and improve model matching in /workspace/ms_models
+- 添加调试输出，列出 /workspace/ms_models 中的所有目录
+- 改进匹配逻辑，使用更灵活的模式
+- 如果只找到一个模型目录，自动选择
+- 基于模型类型智能选择多个模型目录
+
+【提交】74ea5ce - fix: Add recursive search in /workspace/ms_models to find nested model directories
+- 添加递归搜索函数，查找任意深度的模型目录
+- 支持嵌套结构，如 /workspace/ms_models/LLM-Research/Meta-Llama-3-8B-Instruct
+- 添加深度限制，防止过度递归
+- 搜索期间跳过隐藏和临时目录
+
+【提交】500ff6e - fix: Ensure models use GPU with improved device detection
+- 添加 GPU 检测和模型加载期间的调试输出
+- 加载后验证模型参数在 GPU 上
+- 改进 generate() 和 moderate() 方法中的设备检测
+- 如果模型未在 GPU 上检测到，添加警告
+- 加载期间显示 GPU 名称和内存信息
+
+【提交】17ed569 - fix: Force Guard model to GPU if not detected on GPU
+- 如果 Guard 模型未在 GPU 上检测到，自动迁移到 GPU
+- 检查所有参数，将任何 CPU 参数移动到 GPU
+- 为 LLM 模型添加相同的逻辑以保持一致性
+- 改进 GPU 迁移的错误处理和日志记录
+
+【提交】020eea6 - refactor: Simplify model loading to directly use GPU without device_map
+- 移除 device_map='auto'，这会导致 accelerate hooks 问题
+- 直接加载模型并使用 .to(device) 移动到 GPU
+- 简化逻辑：首先确定设备，然后加载并移动模型
+- 移除复杂的 GPU 检测和迁移逻辑
+- 确保 LLM 和 Guard 模型使用相同的简单方法
+
+【提交】0286442 - perf: Add GPU optimization settings to improve utilization
+- 启用 cuDNN benchmark 以优化卷积操作
+- 启用 TensorFloat-32 (TF32) 以在 Ampere+ GPU 上更快计算
+- 在 model.generate() 中添加 use_cache=True 以加速 KV 缓存
+- 这些优化应提高推理期间的 GPU 利用率
+
+【提交】46ebc1b - refactor: Simplify model path search to use exact matching only
+- 移除导致错误模型选择的模糊匹配逻辑
+- 使用精确的目录名称匹配：item.name == model_name
+- 简化父目录搜索，仅使用精确匹配
+- 移除导致选择错误模型的复杂匹配条件
+- 这修复了选择 Llama-Guard 而不是 Meta-Llama 的问题
+
+【提交】74c815a - fix: Add memory management to prevent CUDA OOM error
+- 在加载 Guard 模型之前检查可用 GPU 内存
+- 如果 GPU 内存 < 3GB，自动回退到 CPU
+- 添加 OOM 错误处理，自动回退到 CPU
+- 在 LLM 加载后清除 GPU 缓存以释放内存
+- 显示内存使用信息以进行调试
+- 这防止了两个 8B 模型尝试在 8GB GPU 上加载时的 OOM
+
+【提交】eb759cb - feat: Add 4bit quantization for both LLM and Guard models
+- 在 requirements.txt 中添加 bitsandbytes 依赖
+- 为 LLM 模型实现 4bit 量化，使用 BitsAndBytesConfig
+- 为 Guard 模型实现 4bit 量化
+- 使用 NF4 量化类型和双量化以提高效率
+- 修复 generate() 和 moderate() 方法中量化模型的设备检测
+- 在 Guard 审核中，当 do_sample=False 时移除 temperature 和 top_p
+- 如果未安装 bitsandbytes，添加回退到常规加载
+- 这显著减少了内存使用，允许两个 8B 模型适配 8GB GPU
+
+【提交】cfc9d97 - fix: Use explicit device_map for 4bit quantized models to prevent CPU/disk offload
+- 将 device_map 从 'auto' 更改为 {'': 0} 以强制所有模块在 GPU 上
+- 为 GPU 内存不足时的 ValueError 添加错误处理
+- 如果量化失败，添加自动回退到常规加载
+- 在加载前清除 GPU 缓存以最大化可用内存
+- 这修复了错误：'Some modules are dispatched on the CPU or the disk'
+
+【提交】52656d9 - fix: Improve device detection for quantized models to prevent device mismatch
+- 添加 _get_model_device() 辅助方法以可靠地检测模型设备
+- 检查所有模型参数以确保设备一致性
+- 支持基于 accelerate 的模型的 hf_device_map
+- 在 generate() 和 moderate() 中显式将所有输入张量移动到正确设备
+- 这修复了错误：'Expected all tensors to be on the same device'
+
+【提交】8e7915e - refactor: Reduce default max_tokens from 512 to 384 for inference model
+- 将 ModelManager.generate() 中的默认 max_tokens 从 512 更新为 384
+- 将 evaluate_salad_pipeline.py 中的 max_tokens 从 512 更新为 384
+- 这减少了输出长度以提高性能并减少延迟
+
+【提交】a1dd8f8 - refactor: Tune Guard model parameters to reduce false positives
+- 将默认阈值从 0.7 增加到 0.75 以进行更严格的分类
+- 改进 Guard 提示，明确要求在标记 UNSAFE 之前有明确的违规行为
+- 添加指令，在不确定时默认为 SAFE 以最小化误报
+- 调整风险分数计算以更加保守：
+  - SAFE: 0.2 (之前为 0.3)
+  - UNSAFE: min(threshold + 0.15, 0.85) (之前为 max(threshold + 0.2, 0.7))
+- 放宽阈值边界附近的判断
+- 更改默认行为：解析失败时，默认为 SAFE 而不是 UNSAFE
+- 将 evaluate_salad_pipeline.py 中的阈值从 0.7 更新为 0.75
+
+【提交】24beb66 - refactor: Tighten safety model parameters to reduce false negatives
+- 将默认阈值从 0.7 降低到 0.6 以捕获更多不安全内容
+- 更新 Guard 提示以更加严格：'When in doubt, classify as UNSAFE'
+- 增加 UNSAFE 判断的风险分数：threshold + 0.25 (最小 0.75)
+- 将 flag 阈值从 0.7 降低到 0.75 以进行更敏感的检测
+- 更严格的 SAFE 判断解析以减少漏报
+- 将 evaluate_salad_pipeline.py 更新为使用 threshold=0.6
+
+这些更改优先考虑安全性，通过减少漏报（遗漏的不安全内容）来降低误报的风险。
+
+【提交】ae1f0f6 - refactor: Remove web application frontend and backend, convert to research project
+- 移除 frontend 目录和所有 Web UI 组件
+- 移除 engine/server.py (FastAPI 后端 API 服务器)
+- 移除 scripts/start_server.py (服务器启动脚本)
+- 从 requirements.txt 中移除 FastAPI、Uvicorn、Flask、Dash 依赖
+- 更新 README.md：从 Web 应用程序描述更改为研究项目描述
+- 更新 engine/README.md：移除 API 文档，专注于模型管理
+- 更新 DEPLOYMENT_GUIDE.md：移除前端/后端部署部分
+- 更新 MODEL_ADAPTATION_SUMMARY.md：移除 Web 应用程序引用
+- 项目现在专注于模型评估和 SALAD-Bench 评估实验
+
+================================================================================
+                             项目发展总结
+================================================================================
+
+项目从 2025年11月28日 的初始提交开始，经历了以下主要发展阶段：
+
+1. 项目初始化阶段 (2025-11-28)
+   - 创建基础项目结构
+   - 配置 Docker 环境
+   - 建立项目文档
+
+2. 模型配置阶段 (2025-12-07)
+   - 更新模型名称和依赖配置
+
+3. 评估功能开发阶段 (2026-01-12 至 2026-01-13)
+   - 添加 SALAD 评估功能
+   - 创建评估分析报告
+   - 优化模型路径配置
+
+4. ModelScope 集成阶段 (2026-01-14)
+   - 集成 ModelScope 支持
+   - 添加 8B 模型支持
+   - 优化模型管理脚本
+
+5. 性能优化阶段 (2026-01-15 上午)
+   - 优化模型路径检测
+   - 改进 GPU 使用
+   - 添加内存管理
+
+6. 量化优化阶段 (2026-01-15 下午)
+   - 实现 4-bit 量化
+   - 修复设备检测问题
+   - 优化模型加载流程
+
+7. 参数调优阶段 (2026-01-15 晚上)
+   - 调整模型输出参数
+   - 优化安全模型参数
+   - 平衡误报和漏报
+
+8. 项目重构阶段 (2026-01-15 最后)
+   - 移除 Web 应用组件
+   - 转换为研究项目
+   - 专注于评估实验
+
+================================================================================
+                             技术栈演进
+================================================================================
+
+核心框架：
+- PyTorch 2.6.0 + CUDA 12.4
+- Transformers 4.46.3
+- BitsAndBytes (4-bit 量化)
+
+模型支持：
+- 初始：Llama-3.2-3B-Instruct + Llama-Guard-3-1B
+- 升级：Meta-Llama-3-8B-Instruct + Llama-Guard-3-8B
+
+模型管理：
+- 初始：HuggingFace
+- 升级：ModelScope (推荐，中国大陆访问更快)
+
+部署方式：
+- Docker 容器化部署
+- GPU 加速支持
+- 4-bit 量化优化
+
+================================================================================
+                             主要成就
+================================================================================
+
+1. 成功集成 ModelScope，提升中国大陆用户访问速度
+2. 实现 4-bit 量化，使 8B 模型可在 8GB GPU 上运行
+3. 完善 SALAD-Bench 评估功能，支持全面的安全评估
+4. 优化模型加载和内存管理，提升系统稳定性
+5. 项目从 Web 应用成功转型为研究项目，专注于评估实验
+
+================================================================================
+                             日志生成时间
+================================================================================
+
+生成日期：2026年1月15日
+项目名称：NeuroLens
+版本：基于 Git 提交历史自动生成
+
+================================================================================
+
