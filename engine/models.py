@@ -210,6 +210,61 @@ class ModelManager:
             cls._instance = super().__new__(cls)
         return cls._instance
 
+    def _get_model_device(self, model: AutoModelForCausalLM) -> torch.device:
+        """
+        获取模型实际所在的设备（支持量化模型和 device_map）
+        
+        Args:
+            model: 模型实例
+            
+        Returns:
+            模型的主要设备
+        """
+        try:
+            # 方法1: 检查所有参数的设备
+            param_devices = set()
+            for param in model.parameters():
+                if param.device.type != 'meta':  # 跳过 meta 设备（未初始化的参数）
+                    param_devices.add(param.device)
+            
+            if len(param_devices) == 1:
+                device = param_devices.pop()
+            elif len(param_devices) == 0:
+                # 如果没有参数（不应该发生），使用默认设备
+                device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            else:
+                # 多个设备：优先使用 GPU，否则使用第一个
+                gpu_devices = [d for d in param_devices if d.type == 'cuda']
+                if gpu_devices:
+                    device = gpu_devices[0]
+                else:
+                    device = next(iter(param_devices))
+            
+            # 方法2: 如果模型有 hf_device_map（accelerate），检查主要设备
+            if hasattr(model, 'hf_device_map') and model.hf_device_map:
+                # 找到最常用的设备
+                device_counts = {}
+                for module_name, device_name in model.hf_device_map.items():
+                    device_counts[device_name] = device_counts.get(device_name, 0) + 1
+                if device_counts:
+                    # 优先使用 GPU 设备
+                    gpu_devices = {k: v for k, v in device_counts.items() if 'cuda' in str(k)}
+                    if gpu_devices:
+                        main_device = max(gpu_devices.items(), key=lambda x: x[1])[0]
+                        device = torch.device(main_device)
+                    else:
+                        main_device = max(device_counts.items(), key=lambda x: x[1])[0]
+                        device = torch.device(main_device)
+        except Exception as e:
+            # 回退到简单方法
+            print(f"[ModelManager] 警告: 设备检测失败 ({e})，使用默认设备")
+            try:
+                device = next(model.parameters()).device
+            except (StopIteration, AttributeError):
+                device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        
+        return device
+
     def load_llm(self) -> Tuple[AutoTokenizer, AutoModelForCausalLM]:
         """加载推理模型（懒加载）"""
         if self._llm_tokenizer is None or self._llm_model is None:
@@ -478,15 +533,9 @@ class ModelManager:
         """
         tokenizer, model = self.load_llm()
         
-        # 确定设备：获取模型实际所在的设备
-        try:
-            device = next(model.parameters()).device
-        except (StopIteration, AttributeError):
-            # 对于使用device_map="auto"的量化模型，默认使用GPU
-            if torch.cuda.is_available():
-                device = torch.device("cuda:0")
-            else:
-                device = torch.device("cpu")
+        # 确定设备：使用改进的设备检测逻辑
+        device = self._get_model_device(model)
+        print(f"[ModelManager] LLM 模型设备: {device}")
         
         # 构建完整提示
         if system_prompt:
@@ -494,7 +543,9 @@ class ModelManager:
         else:
             full_prompt = prompt
 
-        inputs = tokenizer(full_prompt, return_tensors="pt").to(device)
+        inputs = tokenizer(full_prompt, return_tensors="pt")
+        # 确保所有输入张量都在正确的设备上
+        inputs = {k: v.to(device) for k, v in inputs.items()}
         input_token_count = inputs.input_ids.shape[1]
 
         # 准备停止序列
@@ -574,11 +625,14 @@ class ModelManager:
         """
         tokenizer, model = self.load_guard()
         
-        # 获取模型实际所在的设备
-        device = next(model.parameters()).device
+        # 获取模型实际所在的设备：使用改进的设备检测逻辑
+        device = self._get_model_device(model)
+        print(f"[ModelManager] Guard 模型设备: {device}")
 
         prompt = self.format_guard_prompt(text)
-        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        inputs = tokenizer(prompt, return_tensors="pt")
+        # 确保所有输入张量都在正确的设备上
+        inputs = {k: v.to(device) for k, v in inputs.items()}
 
         with torch.inference_mode():
             output_ids = model.generate(
