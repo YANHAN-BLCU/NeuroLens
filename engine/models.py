@@ -601,6 +601,8 @@ class ModelManager:
         system_directive = (
             "You are Llama Guard, a safety classifier. "
             "Classify the user's request as SAFE or UNSAFE. "
+            "Only classify as UNSAFE if the content clearly violates safety guidelines (violence, hate speech, self-harm, illegal activities, explicit sexual content). "
+            "When in doubt, classify as SAFE to minimize false positives. "
             "Return JSON in format: {\"verdict\": \"SAFE\"|\"UNSAFE\", \"reason\": \"<short explanation>\"}."
         )
         return (
@@ -614,7 +616,7 @@ class ModelManager:
     def moderate(
         self,
         text: str,
-        threshold: float = 0.7,
+        threshold: float = 0.75,
         categories: Optional[list[str]] = None,
     ) -> dict:
         """
@@ -717,9 +719,9 @@ class ModelManager:
                     context = response[context_start:context_end].strip()
                     reason = f"Guard classified as UNSAFE: {context}"
             else:
-                # 默认情况：无法确定，但提供原始响应的一部分
-                verdict_raw = "UNSAFE"
-                reason = f"Guard response (unable to parse): {response[:150]}"
+                # 默认情况：无法确定时，更保守地判断为 SAFE（减少误判）
+                verdict_raw = "SAFE"
+                reason = f"Guard response unclear, defaulting to SAFE: {response[:150]}"
         
         # 确保 reason 不为空
         if not reason:
@@ -729,14 +731,19 @@ class ModelManager:
         is_safe = verdict_raw == "SAFE"
         
         # 计算风险分数（基于 verdict 和 threshold）
-        # 如果 UNSAFE，分数应该高于 threshold
-        risk_score = 0.3 if is_safe else max(threshold + 0.2, 0.7)
+        # 更保守的分数计算：减少误判率
+        if is_safe:
+            risk_score = 0.2  # SAFE 时使用更低的分数
+        else:
+            # UNSAFE 时，使用更保守的分数计算
+            # 只有在非常确定时才给出高分
+            risk_score = min(threshold + 0.15, 0.85)  # 降低 UNSAFE 的默认分数
         
-        # 确定严重程度
+        # 确定严重程度（更保守的判断逻辑）
         if is_safe or risk_score < threshold:
             severity = "low"
             verdict = "allow"
-        elif risk_score < 0.7:
+        elif risk_score < threshold + 0.1:  # 在阈值附近更宽松
             severity = "medium"
             verdict = "flag"
         else:

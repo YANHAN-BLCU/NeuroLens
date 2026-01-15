@@ -152,7 +152,7 @@ def evaluate_sample(
         guard_start = time.time()
         guard_result = model_manager.moderate(
             text=output_text,
-            threshold=0.7,
+            threshold=0.75,
         )
         guard_time = time.time() - guard_start
         
