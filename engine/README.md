@@ -1,95 +1,72 @@
-# NeuroBreak Engine
+# NeuroLens Engine
 
-后端推理和审核服务，基于 FastAPI 实现。
+模型管理模块，负责加载和使用 Llama 推理模型和 Llama Guard 审核模型。
 
 ## 文件结构
 
-- `server.py` - FastAPI 应用主文件，提供 API 端点
 - `models.py` - 模型管理模块，负责加载和使用 Llama 推理模型和 Llama Guard 审核模型
 - `__init__.py` - 包初始化文件
+- `assessment/` - 评估模块，包含 SALAD 评估相关功能
 
-## API 端点
+## 核心功能
 
-### POST `/api/pipeline/run`
-执行推理 + Guard 联合流程
+### ModelManager
 
-**请求体：**
-```json
-{
-  "prompt": "用户输入文本",
-  "context": "可选上下文",
-  "systemPrompt": "可选系统提示",
-  "inferenceConfig": {
-    "modelId": "meta-llama/Llama-3.2-3B-Instruct",
-    "temperature": 0.7,
-    "topP": 0.9,
-    "topK": 50,
-    "maxTokens": 512,
-    "repetitionPenalty": 1.1,
-    "presencePenalty": 0.0,
-    "frequencyPenalty": 0.0,
-    "stopSequences": [],
-    "stream": false
-  },
-  "guardConfig": {
-    "modelId": "meta-llama/Llama-Guard-3-1B",
-    "threshold": 0.7,
-    "autoBlock": false,
-    "categories": ["violence", "politics"]
-  }
-}
+`ModelManager` 是一个单例类，负责管理推理模型和安全审核模型：
+
+- **推理模型**：基于 Meta Llama 3 8B 模型进行文本生成
+- **安全审核模型**：基于 Llama Guard 3 8B 进行内容安全检测
+
+### 主要方法
+
+- `load_llm()` - 加载推理模型（懒加载）
+- `load_guard()` - 加载安全审核模型（懒加载）
+- `generate()` - 使用推理模型生成文本
+- `moderate()` - 使用 Guard 模型审核文本
+
+## 使用示例
+
+```python
+from engine.models import ModelManager
+
+# 初始化模型管理器
+model_manager = ModelManager()
+
+# 生成文本
+output_text, input_tokens, output_tokens, latency_ms = model_manager.generate(
+    prompt="你好，请介绍一下人工智能",
+    max_tokens=384,
+    temperature=0.7,
+    top_p=0.9,
+)
+
+# 审核文本
+guard_result = model_manager.moderate(
+    text=output_text,
+    threshold=0.6,
+)
 ```
-
-### POST `/api/moderate`
-独立安全审核文本
-
-**请求体：**
-```json
-{
-  "text": "待审核文本",
-  "threshold": 0.7,
-  "categories": ["violence", "politics"]
-}
-```
-
-## 启动方式
-
-1. **使用 uvicorn（推荐）**
-   ```bash
-   uvicorn engine.server:app --host 0.0.0.0 --port 8000 --reload
-   ```
-
-2. **使用启动脚本**
-   ```bash
-   python scripts/start_server.py
-   ```
-
-3. **直接运行模块**
-   ```bash
-   python -m engine.server
-   ```
 
 ## 环境要求
 
 - Python 3.9+
 - PyTorch（支持 CUDA 更佳）
 - Transformers
-- FastAPI
-- Uvicorn
+- ModelScope 或 HuggingFace（用于模型下载）
 
 所有依赖已在 `requirements.txt` 中列出。
 
-## 模型加载
+## 模型配置
 
-首次运行时，模型管理器会自动下载并加载：
-- `meta-llama/Llama-3.2-3B-Instruct` - 推理模型
-- `meta-llama/Llama-Guard-3-1B` - 安全审核模型
+默认使用的模型：
+- `LLM-Research/Meta-Llama-3-8B-Instruct` - 推理模型（ModelScope）
+- `LLM-Research/Llama-Guard-3-8B` - 安全审核模型（ModelScope）
 
-确保已配置 HuggingFace Token 并申请了模型访问权限。
+确保已配置 ModelScope Token 并申请了模型访问权限。
 
 ## 注意事项
 
 - 模型加载需要一定时间，首次请求可能较慢
-- 建议使用 GPU 加速推理
+- 建议使用 GPU 加速推理（8B 模型需要 16GB+ VRAM）
 - 模型会懒加载，只在首次使用时加载
-
+- 支持 4-bit 量化以降低显存占用
