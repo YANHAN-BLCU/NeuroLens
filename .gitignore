@@ -72,7 +72,7 @@ ms_models/**/*.pth
 ms_models/**/original/*.pth
 
 # Docker
-*.dockerignore
+# .dockerignore should be tracked
 
 # Jupyter Notebook
 .ipynb_checkpoints

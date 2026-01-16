@@ -1,0 +1,77 @@
+# 模型文件（通过挂载卷提供，不打包到镜像）
+ms_models/
+hf_models/
+*.safetensors
+*.pth
+*.bin
+*.pt
+*.ckpt
+
+# 缓存目录
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 日志和数据
+logs/
+*.log
+data/salad/raw/*.jsonl
+
+# 工作日志和文档附件
+工作日志.txt
+docs/*.docx
+
+# Git 相关
+.git/
+.gitignore
+.gitattributes
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 环境文件
+.env
+.env.local
+.env.*.local
+
+# 测试和临时文件
+tests/
+*.tmp
+*.temp
+*.bak
+
+# 构建产物
+dist/
+build/
+*.egg-info/
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Node 相关（如果存在）
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Docker 相关
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+
