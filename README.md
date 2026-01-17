@@ -107,7 +107,7 @@ python scripts/run_io_tests.py
 ### 构建镜像
 
 ```bash
-docker build -t neurobreak:latest -f docker/Dockerfile .
+docker build -t neurolens:v1 -f docker/Dockerfile .
 ```
 
 ### 运行容器
