@@ -64,9 +64,11 @@ logs/
 *.pth
 *.bin
 *.pt
+hf_models/
 hf_models/**/*.safetensors
 hf_models/**/*.pth
 hf_models/**/original/*.pth
+ms_models/
 ms_models/**/*.safetensors
 ms_models/**/*.pth
 ms_models/**/original/*.pth
