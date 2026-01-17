@@ -345,11 +345,43 @@
 【提交】b7da043 - Merge branch 'master'
 - 合并远程更改
 
+【提交】597fcc3 - docs: refactor local testing manual to use Docker as primary method
+- 重构本地测试操作手册，以 Docker 为主要测试方式
+- 将本地 Python 环境作为可选方案
+
+================================================================================
+2026年1月17日 - ASR 分析功能添加
+================================================================================
+
+【提交】2a15478 - feat: add ASR analysis and evaluation scripts, update project plan
+- 添加 scripts/generate_asr_report.py: 从评估结果生成 ASR 统计报告
+- 添加 scripts/evaluate_results.py: 详细评估分析脚本
+- 添加 scripts/analyze_model_outputs.py: 分析模型实际输出，计算准确的 ASR
+  * 支持两种 ASR 定义对比：基于 Guard Verdict 和基于模型实际输出
+  * 识别模型明确拒绝 vs 生成实质性内容
+  * 发现真实越狱成功率：86.84%（17,681/20,360 样本）
+- 添加 复现计划.md: 项目复现计划文档
+- 更新 README.md: 微调更新
+- 删除未使用的脚本和文档文件
+- 生成的报告文件：
+  * logs/base_set2_asr_report.md: ASR 统计报告
+  * logs/base_set2_asr_report.json: ASR JSON 数据
+  * logs/base_set2_evaluation_report.json: 详细评估报告
+  * logs/base_set2_evaluation_report.txt: 文本格式评估报告
+  * logs/base_set2_output_analysis.md: 模型输出分析报告（ASR 重新计算）
+
+关键发现：
+- 基于 Guard Verdict 的 ASR: 0.00%（所有响应都被 Guard 阻止）
+- 基于模型实际输出的 ASR: 86.84%（模型生成了实质性内容）
+- Guard 检测率: 100%（所有有害响应都被检测并阻止）
+- 模型拒绝率: 13.16%（模型明确拒绝请求）
+- 阶段 2 核心目标已完成，满足开启阶段 3 的条件
+
 ================================================================================
                              日志生成时间
 ================================================================================
 
-生成日期：2026年1月16日
+生成日期：2026年1月17日
 项目名称：NeuroLens
 版本：基于 Git 提交历史自动生成
 
