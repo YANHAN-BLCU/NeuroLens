@@ -377,6 +377,15 @@
 - 模型拒绝率: 13.16%（模型明确拒绝请求）
 - 阶段 2 核心目标已完成，满足开启阶段 3 的条件
 
+【提交】368e87e - docs: update work log with ASR analysis features
+- 更新工作日志，记录 ASR 分析功能添加
+
+【提交】8bf8a17 - chore: update .gitignore to exclude entire ms_models directory
+- 更新 .gitignore，完全排除 ms_models 目录，避免提交大模型文件
+
+【提交】ce92bd0 - Merge branch 'master'
+- 合并远程分支更改
+
 ================================================================================
                              日志生成时间
 ================================================================================
