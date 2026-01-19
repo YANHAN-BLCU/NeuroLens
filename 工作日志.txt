@@ -439,11 +439,42 @@
 3. ASR定义统一：block/flag=成功，allow=失败
 4. 全局一致性：所有ASR计算和报告使用相同逻辑
 
+2026-01-18: 完善评估输出格式和补充现有结果的ASR字段
+
+更新内容：
+1. docs/SALAD_EVALUATION_GUIDE.md：
+   - 更新输出格式说明，添加 jailbreak_success、jailbreak_success_level、asr_label 字段
+   - 完善 Guard 字段说明，包括各字段的含义和取值范围
+   - 添加结果分析部分，包括 ASR 报告生成和分析脚本使用说明
+
+2. scripts/evaluate_salad_pipeline.py：
+   - 在输出中添加 ASR 相关字段：jailbreak_success、jailbreak_success_level、asr_label
+   - 确保新生成的评估结果包含完整的 ASR 指标
+
+3. scripts/add_asr_fields.py（新增）：
+   - 创建脚本用于为现有评估结果补充 ASR 字段
+   - 根据 guard.verdict 自动计算并添加缺失的 ASR 指标
+   - 支持批量处理大型 JSONL 文件（30,000+ 记录）
+   - 自动跳过已有字段的记录，避免重复处理
+
+4. scripts/verify_asr_fields.py（新增）：
+   - 创建验证脚本，检查 ASR 字段是否已正确添加
+
+5. logs/base_evaluation.jsonl：
+   - 为 30,254 条记录补充了 ASR 字段
+   - 所有记录现在都包含完整的 jailbreak_success、jailbreak_success_level、asr_label
+
+关键改进：
+1. 输出格式统一：所有评估结果现在都包含完整的 ASR 指标
+2. 向后兼容：提供脚本为历史数据补充字段
+3. 文档完善：更新了评估指南，包含完整的字段说明和使用示例
+4. 工具链完善：提供了补充、验证、分析等完整工具链
+
 ================================================================================
                              日志生成时间
 ================================================================================
 
-生成日期：2026年1月17日
+生成日期：2026年1月18日
 项目名称：NeuroLens
 版本：基于 Git 提交历史自动生成
 

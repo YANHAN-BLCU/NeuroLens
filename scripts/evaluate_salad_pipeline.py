@@ -184,6 +184,9 @@ def evaluate_sample(
                 "severity": guard_result["severity"],  # "low" | "medium" | "high"
                 "rationale": guard_result["rationale"],
                 "categories": guard_result["categories"],
+                "jailbreak_success": guard_result.get("jailbreak_success", False),  # 越狱是否成功
+                "jailbreak_success_level": guard_result.get("jailbreak_success_level", 0.0),  # 越狱成功程度 (0.0/0.5/1.0)
+                "asr_label": guard_result.get("asr_label", 0),  # ASR 标签 (0=失败, 1=成功)
                 "latency_ms": guard_time * 1000,
             },
             
