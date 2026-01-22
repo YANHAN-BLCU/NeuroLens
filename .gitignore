@@ -53,8 +53,13 @@ dist-ssr/
 .env.*.local
 
 # Logs
-logs/
-*.log
+logs/*.jsonl
+logs/*.jsonl.backup
+logs/*.log
+logs/errors/
+logs/baseline/
+logs/第一次测试/*.jsonl
+logs/第一次测试/*.log
 
 # Data (if contains sensitive info)
 # data/
