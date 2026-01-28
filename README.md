@@ -7,9 +7,11 @@
 - 🤖 **智能推理**：基于 Meta Llama 3 8B 模型进行文本生成和对话
 - 🛡️ **安全审核**：集成 Llama Guard 3 进行内容安全检测和过滤
 - 🧪 **SALAD 评估**：支持 SALAD-Bench 数据集评估，测试模型安全防护能力
+- 🔍 **线性探针训练**：训练分层线性探针，识别模型隐藏状态中的有害语义
 - 📊 **结果分析**：提供完整的评估结果分析和报告生成
 - 🐳 **Docker 支持**：完整的容器化部署方案，便于实验环境复现
 - ⚙️ **灵活配置**：支持自定义模型参数、审核阈值和类别
+- 📈 **数据划分策略**：支持多种数据划分方案（6:2:2、6.5:1:1.5等）和过采样
 
 ## 🏗️ 技术栈
 
@@ -96,6 +98,44 @@ python scripts/evaluate_salad_pipeline.py \
 .\scripts\run_salad_evaluation.ps1 -Config base_set -MaxSamples 100
 ```
 
+#### 线性探针训练
+
+训练分层线性探针，识别模型隐藏状态中的有害语义：
+
+```bash
+# 基本训练（6.5:1:1.5 划分方案）
+python scripts/train_linear_probes.py \
+    --data_file data/salad/raw/base_evaluation.jsonl \
+    --output_dir outputs/probes \
+    --num_epochs 80 \
+    --lr 3e-3
+
+# 6:2:2 划分 + 训练集过采样（方案A：1:1.5比例）
+python scripts/train_622_full.py \
+    --data_file data/salad/raw/base_evaluation.jsonl \
+    --output_dir outputs/probes_622_full \
+    --oversample_probe_train \
+    --num_epochs 80
+
+# 6:2:2 划分 + 1.5:1 训练集比例 + 测试集评估
+python scripts/train_test_1_5_1.py \
+    --data_file data/salad/raw/base_evaluation.jsonl \
+    --output_dir outputs/probes_test_1_5_1 \
+    --num_epochs 80
+
+# 使用预提取的隐藏态缓存（更快）
+python scripts/extract_hidden_states.py \
+    --data_file data/salad/raw/base_evaluation.jsonl \
+    --max_samples 8000 \
+    --output outputs/hidden_states_cache/cache.npz
+
+python scripts/train_linear_probes.py \
+    --hidden_states_cache outputs/hidden_states_cache/cache.npz \
+    --output_dir outputs/probes
+```
+
+详细说明请参考 [探针训练逻辑](docs/探针训练逻辑.md)。
+
 #### IO 测试
 
 ```bash
@@ -139,6 +179,10 @@ NeuroBreak-Reproduction/
 ├── scripts/               # 工具脚本
 │   ├── download_models.py # 模型下载脚本
 │   ├── evaluate_salad_pipeline.py # SALAD 评估脚本
+│   ├── train_linear_probes.py # 线性探针训练脚本
+│   ├── train_622_full.py # 6:2:2划分 + 过采样训练脚本
+│   ├── train_test_1_5_1.py # 6:2:2划分 + 测试集评估脚本
+│   ├── extract_hidden_states.py # 隐藏态提取脚本
 │   ├── analyze_salad_results.py # SALAD 结果分析脚本
 │   └── ...
 ├── docs/                  # 文档目录
@@ -164,6 +208,8 @@ NeuroBreak-Reproduction/
 - [模型适配总结](docs/MODEL_ADAPTATION_SUMMARY.md) - 模型配置说明
 - [SALAD 评估指南](docs/SALAD_EVALUATION_GUIDE.md) - SALAD-Bench 数据集评估指南
 - [SALAD 评估分析](docs/SALAD_EVALUATION_ANALYSIS.md) - SALAD 评估结果分析报告
+- [探针训练逻辑](docs/探针训练逻辑.md) - 线性探针训练详细说明
+- [数据集划分用途详解](docs/数据集划分用途详解.md) - 数据划分策略说明
 
 ## 🧪 测试与评估
 

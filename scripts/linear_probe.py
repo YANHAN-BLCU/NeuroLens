@@ -204,7 +204,7 @@ def extract_hidden_states(
     batch_size: int = 8,
 ) -> List[np.ndarray]:
     """
-    提取模型各层的隐藏状态（使用最后token的隐藏状态）
+    提取模型各层的隐藏状态（对非 padding token 做平均池化）
     
     Args:
         model: 语言模型
@@ -243,25 +243,29 @@ def extract_hidden_states(
                 return_dict=True,
             )
         
-        # 提取每层最后token的隐藏状态
-        # hidden_states是一个元组，包含embedding层和所有transformer层的输出
+        # 提取每层的池化隐藏状态
+        # hidden_states 是一个元组，包含 embedding 层和所有 transformer 层的输出
         # 形状: (num_layers + 1, batch_size, seq_len, hidden_dim)
         hidden_states = outputs.hidden_states
         
         batch_size_actual = inputs["input_ids"].shape[0]
         
         for b in range(batch_size_actual):
-            # 获取该样本的实际序列长度（排除padding）
+            # 获取该样本的实际序列长度（排除 padding）
             seq_len = (inputs["attention_mask"][b] == 1).sum().item()
-            last_token_idx = seq_len - 1
-            
-            # 提取每层最后token的隐藏状态
+            if seq_len <= 0:
+                # 理论上不会发生，做个保护，直接跳过
+                continue
+
+            # 提取每层非 padding token 的平均池化隐藏状态
             layer_hidden_states = []
             for layer_idx, layer_hs in enumerate(hidden_states):
-                # layer_hs形状: (batch_size, seq_len, hidden_dim)
-                last_token_hs = layer_hs[b, last_token_idx, :].cpu().numpy()
-                layer_hidden_states.append(last_token_hs)
-            
+                # layer_hs 形状: (batch_size, seq_len, hidden_dim)
+                # 取该样本前 seq_len 个 token，然后在 token 维度做平均池化
+                valid_tokens = layer_hs[b, :seq_len, :]  # (seq_len, hidden_dim)
+                pooled_hs = valid_tokens.mean(dim=0).cpu().numpy()
+                layer_hidden_states.append(pooled_hs)
+
             # 堆叠为 (num_layers, hidden_dim)
             all_hidden_states.append(np.stack(layer_hidden_states))
     
@@ -302,32 +306,29 @@ def get_layer_training_config(
             "dropout": base_dropout * 0.5,  # 0.05
             "min_required_acc": 0.76,  # 最低要求76%
         }
-    elif layer_idx < 15:
-        # 中层：标准配置
+    elif layer_idx < 15:        # 中层：略增 dropout 减轻过拟合
         return {
-            "num_epochs": base_epochs,  # 50轮
-            "learning_rate": base_lr,  # 2e-3
-            "dropout": base_dropout,  # 0.1
-            "min_required_acc": 0.85,  # 最低要求85%
+            "num_epochs": base_epochs,
+            "learning_rate": base_lr,
+            "dropout": min(0.15, base_dropout * 1.2),  # 0.12，减轻过拟合
+            "min_required_acc": 0.85,
         }
     elif layer_idx >= 15:
-        # 检查是否是峰值层（第28层对于32层模型，或倒数第4层对于其他层数）
         peak_layer = 28 if num_layers >= 32 else num_layers - 4
         if layer_idx == peak_layer:
-            # 峰值层：特殊优化，确保达到峰值93%
             return {
-                "num_epochs": int(base_epochs * 1.2),  # 60轮
-                "learning_rate": base_lr * 1.1,  # 2.2e-3
-                "dropout": base_dropout * 0.7,  # 0.07
-                "min_required_acc": 0.93,  # 最低要求93%
+                "num_epochs": int(base_epochs * 1.2),
+                "learning_rate": base_lr * 1.1,
+                "dropout": min(0.12, base_dropout * 1.2),  # 0.12，减轻过拟合
+                "min_required_acc": 0.93,
             }
         else:
-            # 深层（15+但不是峰值层）：需要达到90%以上
+            # 深层：略增 dropout 减轻过拟合
             return {
-                "num_epochs": base_epochs,  # 50轮
-                "learning_rate": base_lr,  # 2e-3
-                "dropout": base_dropout * 0.8,  # 0.08
-                "min_required_acc": 0.90,  # 最低要求90%
+                "num_epochs": base_epochs,
+                "learning_rate": base_lr,
+                "dropout": min(0.15, base_dropout * 1.2),  # 0.12，减轻过拟合
+                "min_required_acc": 0.90,
             }
     else:
         # 默认配置
@@ -356,6 +357,7 @@ def train_layer_probes(
     test_hidden_states: Optional[List[np.ndarray]] = None,
     test_labels: Optional[List[int]] = None,
     ensure_accuracy_requirements: bool = True,  # 确保达到准确率要求
+    use_class_weight: bool = True,  # 对有害类（少数类）提高权重，逆频率
 ) -> Dict[int, Dict]:
     """
     训练各层的线性探针分类器
@@ -372,10 +374,11 @@ def train_layer_probes(
         batch_size: 批次大小
         learning_rate: 学习率
         weight_decay: 权重衰减
-        val_hidden_states: 外部验证集隐藏状态（可选，如果提供则使用外部验证集）
+        val_hidden_states: 外部验证集隐藏状态（可选）
         val_labels: 外部验证集标签（可选，必须与 val_hidden_states 一起提供）
-        test_hidden_states: 测试集隐藏状态（可选，用于评估）
+        test_hidden_states: 测试集隐藏状态（可选）；若提供则每轮记录 test_acc 到 training_history
         test_labels: 测试集标签（可选，必须与 test_hidden_states 一起提供）
+        use_class_weight: 是否对有害类（少数类）逆频率加权，默认 True
     
     Returns:
         每层的训练结果字典，包含模型、指标和毒性向量
@@ -383,6 +386,19 @@ def train_layer_probes(
     # 准备数据
     train_hidden = [hidden_states[i] for i in train_indices]
     train_labels = [labels[i] for i in train_indices]
+    
+    # 类别权重：对有害类（少数类）提高权重，逆频率 w_i = n_total / (2 * n_i)，上限 5.0
+    class_weight_tensor = None
+    if use_class_weight:
+        n_safe = sum(1 for l in train_labels if l == 0)
+        n_toxic = sum(1 for l in train_labels if l == 1)
+        n_total = len(train_labels)
+        w_safe = n_total / (2.0 * max(1, n_safe))
+        w_toxic = n_total / (2.0 * max(1, n_toxic))
+        w_safe = min(5.0, w_safe)
+        w_toxic = min(5.0, w_toxic)
+        class_weight_tensor = torch.tensor([w_safe, w_toxic], dtype=torch.float32)
+        print(f"[Class Weight] 安全(0)={n_safe} weight={w_safe:.3f}, 有害(1)={n_toxic} weight={w_toxic:.3f}")
     
     # 准备验证数据（优先使用外部验证集）
     if val_hidden_states is not None and val_labels is not None:
@@ -393,9 +409,6 @@ def train_layer_probes(
         # 从训练集中划分验证集（旧方式）
         val_hidden = [hidden_states[i] for i in val_indices]
         val_labels_list = [labels[i] for i in val_indices]
-    
-    # 准备测试数据（如果提供）
-    has_test = test_hidden_states is not None and test_labels is not None
     
     results = {}
     
@@ -419,7 +432,13 @@ def train_layer_probes(
         # 提取该层的隐藏状态
         train_layer_hs = [hs[layer_idx] for hs in train_hidden]
         val_layer_hs = [hs[layer_idx] for hs in val_hidden]
-        
+        test_layer_hs = None
+        test_loader = None
+        if test_hidden_states is not None and test_labels is not None:
+            test_layer_hs = [hs[layer_idx] for hs in test_hidden_states]
+            test_dataset = HiddenStateDataset(test_layer_hs, test_labels)
+            test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
         # 创建数据集
         train_dataset = HiddenStateDataset(train_layer_hs, train_labels)
         val_dataset = HiddenStateDataset(val_layer_hs, val_labels_list)
@@ -435,23 +454,14 @@ def train_layer_probes(
             shuffle=False,
         )
         
-        # 准备测试集数据加载器（如果提供）
-        test_loader = None
-        if has_test:
-            test_layer_hs = [hs[layer_idx] for hs in test_hidden_states]
-            test_dataset = HiddenStateDataset(test_layer_hs, test_labels)
-            test_loader = DataLoader(
-                test_dataset,
-                batch_size=batch_size,
-                shuffle=False,
-            )
-        
         # 训练循环（如果未达到要求，会重试）
         max_retries = 2 if ensure_accuracy_requirements else 0
         retry_count = 0
         best_val_acc = 0.0
         best_probe_state = None
-        
+        best_val_roc_auc = 0.0
+        best_val_pr_auc = 0.0
+
         while retry_count <= max_retries:
             # 创建模型（使用该层的配置）
             probe = LinearProbe(
@@ -460,7 +470,11 @@ def train_layer_probes(
                 init_method="xavier",
             ).to(device)
             
-            criterion = nn.CrossEntropyLoss()
+            criterion = (
+                nn.CrossEntropyLoss(weight=class_weight_tensor.to(device))
+                if class_weight_tensor is not None
+                else nn.CrossEntropyLoss()
+            )
             # 服务器训练优化：使用AdamW优化器（权重衰减更稳定）
             optimizer = torch.optim.AdamW(
                 probe.parameters(),
@@ -487,14 +501,16 @@ def train_layer_probes(
             # 训练
             best_val_acc_this_try = 0.0
             best_probe_state_this_try = None
+            best_val_roc_auc_this_try = 0.0
+            best_val_pr_auc_this_try = 0.0
             no_improve_count = 0
-            
+
             # 记录训练历史（用于生成曲线）
             training_history = {
                 "epochs": [],
                 "train_acc": [],
                 "val_acc": [],
-                "test_acc": [],  # 添加测试集准确率
+                "test_acc": [],
                 "train_loss": [],
                 "val_loss": [],
                 "learning_rate": [],
@@ -555,9 +571,23 @@ def train_layer_probes(
                 # 计算指标
                 train_acc = accuracy_score(train_targets, train_preds)
                 val_acc = accuracy_score(val_targets, val_preds)
-                
-                # 计算ROC-AUC和PR-AUC
-                if len(set(val_targets)) > 1:  # 确保有正负样本
+
+                # 测试集准确率（若提供测试集则每轮计算并记录）
+                test_acc = None
+                if test_loader is not None:
+                    test_preds = []
+                    test_targets = []
+                    with torch.no_grad():
+                        for batch in test_loader:
+                            hs = batch["hidden_states"].to(device)
+                            label = batch["label"].to(device)
+                            logits = probe(hs)
+                            test_preds.extend(torch.argmax(logits, dim=-1).cpu().numpy())
+                            test_targets.extend(label.cpu().numpy())
+                    test_acc = float(accuracy_score(test_targets, test_preds))
+
+                # 计算ROC-AUC和PR-AUC（验证集需同时含安全/有害）
+                if len(set(val_targets)) > 1:
                     try:
                         val_roc_auc = roc_auc_score(val_targets, val_probs)
                         precision, recall, _ = precision_recall_curve(val_targets, val_probs)
@@ -565,91 +595,79 @@ def train_layer_probes(
                     except ValueError:
                         val_roc_auc = 0.0
                         val_pr_auc = 0.0
-            else:
-                val_roc_auc = 0.0
-                val_pr_auc = 0.0
-            
-            # 测试集评估（如果提供）
-            test_acc = None
-            if test_loader is not None:
-                probe.eval()
-                test_preds = []
-                test_targets = []
-                with torch.no_grad():
-                    for batch in test_loader:
-                        hs = batch["hidden_states"].to(device)
-                        label = batch["label"].to(device)
-                        logits = probe(hs)
-                        test_preds.extend(torch.argmax(logits, dim=-1).cpu().numpy())
-                        test_targets.extend(label.cpu().numpy())
-                test_acc = accuracy_score(test_targets, test_preds)
-            
-            # 学习率调度（基于验证准确率）
-            scheduler.step(val_acc)
-            
-            # 获取当前学习率
-            current_lr = optimizer.param_groups[0]['lr']
-            
-            # 记录训练历史
-            training_history["epochs"].append(epoch + 1)
-            training_history["train_acc"].append(float(train_acc))
-            training_history["val_acc"].append(float(val_acc))
-            training_history["test_acc"].append(float(test_acc) if test_acc is not None else None)
-            training_history["train_loss"].append(float(train_loss / len(train_loader)))
-            training_history["val_loss"].append(float(val_loss / len(val_loader)))
-            training_history["learning_rate"].append(float(current_lr))
-            
-            # 保存最佳模型
-            if val_acc > best_val_acc_this_try:
-                best_val_acc_this_try = val_acc
-                best_probe_state_this_try = probe.state_dict().copy()
-                no_improve_count = 0
-            else:
-                no_improve_count += 1
-            
-            # 早停检查：如果达到要求且连续10轮无提升，提前停止
-            if ensure_accuracy_requirements and best_val_acc_this_try >= min_required_acc and no_improve_count >= 10:
-                if retry_count == 0:  # 只在第一次尝试时早停
-                    print(f"[Layer {layer_idx}] 已达到要求 ({best_val_acc_this_try:.2%} >= {min_required_acc:.0%})，提前停止训练")
-                    break
-            
-            # 更新全局最佳
-            if best_val_acc_this_try > best_val_acc:
-                best_val_acc = best_val_acc_this_try
-                best_probe_state = best_probe_state_this_try
-            
-            # 检查是否达到要求
-            if ensure_accuracy_requirements and best_val_acc_this_try < min_required_acc:
-                if retry_count < max_retries:
-                    retry_count += 1
-                    # 调整参数重试
-                    layer_lr *= 1.2  # 提高学习率
-                    layer_epochs = int(layer_epochs * 1.2)  # 增加训练轮数
-                    layer_dropout *= 0.8  # 减少dropout
-                    print(f"[Layer {layer_idx}] 准确率 {best_val_acc_this_try:.2%} < 要求 {min_required_acc:.0%}，"
-                          f"重试 {retry_count}/{max_retries}（调整参数：lr={layer_lr:.4f}, epochs={layer_epochs}, dropout={layer_dropout:.3f}）")
-                    continue
                 else:
-                    # 已达到最大重试次数，打印警告并退出循环
-                    print(f"[Layer {layer_idx}] ⚠ 警告: 准确率 {best_val_acc_this_try:.2%} < 要求 {min_required_acc:.0%}，"
-                          f"已达到最大重试次数，使用当前最佳模型")
-                    break  # 退出重试循环，避免重复打印
-            else:
-                # 达到要求，退出重试循环
-                if retry_count > 0:
-                    print(f"[Layer {layer_idx}] ✓ 重试成功: 准确率 {best_val_acc_this_try:.2%} >= 要求 {min_required_acc:.0%}")
-                break
+                    val_roc_auc = 0.0
+                    val_pr_auc = 0.0
+
+                # 学习率调度（基于验证准确率）
+                scheduler.step(val_acc)
+
+                # 获取当前学习率
+                current_lr = optimizer.param_groups[0]['lr']
+
+                # 记录训练历史
+                training_history["epochs"].append(epoch + 1)
+                training_history["train_acc"].append(float(train_acc))
+                training_history["val_acc"].append(float(val_acc))
+                training_history["test_acc"].append(test_acc if test_acc is not None else None)
+                training_history["train_loss"].append(float(train_loss / len(train_loader)))
+                training_history["val_loss"].append(float(val_loss / len(val_loader)))
+                training_history["learning_rate"].append(float(current_lr))
+
+                # 保存最佳模型（同时记录该轮 roc/pr auc，便于结果与最佳模型一致）
+                if val_acc > best_val_acc_this_try:
+                    best_val_acc_this_try = val_acc
+                    best_probe_state_this_try = probe.state_dict().copy()
+                    best_val_roc_auc_this_try = val_roc_auc
+                    best_val_pr_auc_this_try = val_pr_auc
+                    no_improve_count = 0
+                else:
+                    no_improve_count += 1
+
+                # 早停（减轻过拟合）：达标后 6 轮无提升即停；或任意连续 15 轮无提升即停
+                if ensure_accuracy_requirements and best_val_acc_this_try >= min_required_acc and no_improve_count >= 6:
+                    if retry_count == 0:
+                        print(f"[Layer {layer_idx}] 已达到要求 ({best_val_acc_this_try:.2%} >= {min_required_acc:.0%})，提前停止训练")
+                    break
+                if no_improve_count >= 15:
+                    if retry_count == 0:
+                        print(f"[Layer {layer_idx}] 连续 15 轮验证无提升，提前停止（减轻过拟合）")
+                    break
+
+                # 更新全局最佳（含该轮的 roc/pr auc）
+                if best_val_acc_this_try > best_val_acc:
+                    best_val_acc = best_val_acc_this_try
+                    best_probe_state = best_probe_state_this_try
+                    best_val_roc_auc = best_val_roc_auc_this_try
+                    best_val_pr_auc = best_val_pr_auc_this_try
+
+                # 检查是否达到要求
+                if ensure_accuracy_requirements and best_val_acc_this_try < min_required_acc:
+                    if retry_count < max_retries:
+                        retry_count += 1
+                        layer_lr *= 1.2
+                        layer_epochs = int(layer_epochs * 1.2)
+                        layer_dropout *= 0.8
+                        print(f"[Layer {layer_idx}] 准确率 {best_val_acc_this_try:.2%} < 要求 {min_required_acc:.0%}，"
+                              f"重试 {retry_count}/{max_retries}（lr={layer_lr:.4f}, epochs={layer_epochs}, dropout={layer_dropout:.3f}）")
+                        break  # 退出 for epoch，进入下一轮 while 重试
+                    else:
+                        print(f"[Layer {layer_idx}] ⚠ 警告: 准确率 {best_val_acc_this_try:.2%} < 要求 {min_required_acc:.0%}，"
+                              "已达到最大重试次数，使用当前最佳模型")
+                        break
+                else:
+                    if retry_count > 0:
+                        print(f"[Layer {layer_idx}] ✓ 重试成功: 准确率 {best_val_acc_this_try:.2%} >= 要求 {min_required_acc:.0%}")
+                    break
         
         # 加载最佳模型
         if best_probe_state is not None:
             probe.load_state_dict(best_probe_state)
         else:
-            # 如果没有任何模型，使用最后一次训练的模型
             print(f"[Layer {layer_idx}] ⚠ 警告: 使用最后一次训练的模型（未找到最佳模型）")
-        
-        # 获取毒性向量
+
         w_toxic, b = probe.get_toxic_vector()
-        
+
         # 检查是否达到要求
         layer_config = get_layer_training_config(
             layer_idx=layer_idx,
@@ -660,15 +678,15 @@ def train_layer_probes(
         )
         min_required_acc = layer_config["min_required_acc"]
         meets_requirement = best_val_acc >= min_required_acc
-        
-        # 保存结果（包含训练历史）
+
+        # 保存结果（val_roc_auc/val_pr_auc 为达到 best_val_acc 那一轮的值）
         results[layer_idx] = {
             "model": probe,
             "metrics": {
                 "train_acc": train_acc,
                 "val_acc": best_val_acc,
-                "val_roc_auc": val_roc_auc,
-                "val_pr_auc": val_pr_auc,
+                "val_roc_auc": best_val_roc_auc,
+                "val_pr_auc": best_val_pr_auc,
                 "min_required_acc": min_required_acc,
                 "meets_requirement": meets_requirement,
             },

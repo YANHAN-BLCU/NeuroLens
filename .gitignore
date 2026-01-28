@@ -52,17 +52,15 @@ dist-ssr/
 .env.local
 .env.*.local
 
-# Logs
-logs/*.jsonl
-logs/*.jsonl.backup
-logs/*.log
-logs/errors/
-logs/baseline/
-logs/第一次测试/*.jsonl
-logs/第一次测试/*.log
+# Logs and outputs
+logs/
+outputs/
 
-# Data (if contains sensitive info)
-# data/
+# Data files (large files, should not be committed)
+data/**/*.jsonl
+data/**/*.zip
+data/**/*.json
+!data/**/README.md
 
 # Model files (large files, should not be committed)
 *.safetensors
