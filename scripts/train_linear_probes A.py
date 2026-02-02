@@ -7,9 +7,9 @@
 - **自动使用4-bit量化**：通过 ModelManager 加载模型，自动启用4-bit量化以节省显存
 - 从 `input.prompt` 读取文本
 - 使用 Guard 的 `asr_label` / `verdict` 自动标记安全(0) 与有害(1)
-- 按数据集划分文档进行数据划分（6.5:1:1.5方案）
-- 探针训练集1:1平衡，验证集保持原始分布
-- 每层使用最后 token 的隐藏态，训练 softmax 线性探针
+- 数据划分：使用 --use_optimized_split（含 6:2:2 等）或默认优化划分（6:2:2 比例）
+- 6:2:2 划分时对探针训练集过采样有害样本，使安全:有害 = 1.5:1；验证集保持与总体相近的分布；训练不使用类别权重
+- 每层使用token 的平均池化状态，训练 softmax 线性探针
 - 自动过滤准确率 < 75% 的浅层探针
 - 输出每层指标与毒性向量 w_toxic, b（已归一化）
 
@@ -95,47 +95,73 @@ def load_attack_enhanced(
     return texts, labels
 
 
+def oversample_probe_train(
+    texts: List[str],
+    labels: List[int],
+    target_safe_toxic_ratio: float = 1.5,
+    seed: int = 42,
+) -> Tuple[List[str], List[int]]:
+    """
+    对探针训练集过采样有害样本，使安全:有害 = target_safe_toxic_ratio:1。
+    保持安全样本不变，通过有放回抽样反复采用有害样本直至达到目标比例。
+    """
+    safe_texts = [t for t, l in zip(texts, labels) if l == 0]
+    safe_labels = [0] * len(safe_texts)
+    toxic_texts = [t for t, l in zip(texts, labels) if l == 1]
+    toxic_labels = [1] * len(toxic_texts)
+    n_safe, n_toxic = len(safe_texts), len(toxic_texts)
+    if n_toxic == 0:
+        return texts, labels
+    # 目标有害数 = 安全数 / 目标比例，使 安全:有害 = target_safe_toxic_ratio:1
+    n_toxic_target = int(round(n_safe / target_safe_toxic_ratio))
+    if n_toxic >= n_toxic_target:
+        # 已满足或有害更多，不做欠采样，直接返回
+        return texts, labels
+    rng = np.random.RandomState(seed)
+    extra_idx = rng.choice(n_toxic, size=n_toxic_target - n_toxic, replace=True)
+    extra_texts = [toxic_texts[i] for i in extra_idx]
+    extra_labels = [1] * (n_toxic_target - n_toxic)
+    new_texts = safe_texts + toxic_texts + extra_texts
+    new_labels = safe_labels + toxic_labels + extra_labels
+    # 打乱顺序
+    combined = list(zip(new_texts, new_labels))
+    random.Random(seed + 10).shuffle(combined)
+    new_texts, new_labels = zip(*combined)
+    n_safe_final = n_safe
+    n_toxic_final = n_toxic_target
+    print(f"[Oversample] 探针训练集过采样: 安全={n_safe_final}, 有害={n_toxic} -> {n_toxic_final}, 比例 安全:有害={target_safe_toxic_ratio}:1, 总样本={len(new_texts)}")
+    return list(new_texts), list(new_labels)
+
+
 def split_data_optimized(
     texts: List[str],
     labels: List[int],
-    test_ratio: float = 0.15,
-    val_ratio: float = 0.15,  # 验证集占总数据的比例
-    balance_train: bool = True,
-    train_safe_ratio: float = 1.0,  # 训练集安全/有害比例（1.0=1:1平衡，2.0=2:1，3.0=3:1）
-    balance_val: bool = False,  # 验证集是否平衡到1:1（默认False，允许不平衡）
-    balance_test: bool = False,  # 测试集是否平衡到1:1（默认False，允许不平衡）
+    test_ratio: float = 0.20,  # 6:2:2 测试集 20%
+    val_ratio: float = 0.20,   # 6:2:2 验证集 20%
     min_test_toxic: int = 100,  # 测试集最少有害样本数
     min_val_toxic: int = 100,   # 验证集最少有害样本数
     seed: int = 42,
-    use_doc_ratios: bool = False,  # 按文档划分：80%训练池+20%测试，训练池内 72.2% 探针训练、11.1% 验证、16.7% 分析
     use_ratio_6_2_2: bool = False,  # 6:2:2 分层划分：Task-Train 60%→Probe-Train 42%+Probe-Val 18%，Task-Test 20%
     probe_val_ratio_in_train: float = 0.3,  # 仅 use_ratio_6_2_2 时有效：Task-Train 内探针验证集比例，0.3→18% 总数
     use_ratio_6_2_2_full_train: bool = False,  # 6:2:2 剩余全作训练集：60% 训练、20% 验证、20% 测试
-    train_safe_ratio_622_full: float | None = None,  # 仅 6:2:2 全训练时有效：训练集安全:有害比例，如 1.5 即 1.5:1；None 表示用满 60% 不讲究比例
 ) -> Tuple[List[str], List[int], List[str], List[int], List[str], List[int]]:
     """
-    优化的数据划分函数：优先分离测试集和验证集，根据实际数据分布自动计算最优比例，最大化数据利用率
+    优化的数据划分函数：优先分离测试集和验证集，训练集使用全部剩余数据，6:2:2 时后续过采样至安全:有害=1.5:1。
     
     策略：
     1. 先分析数据集的实际分布（安全/有害比例）
     2. 优先为测试集和验证集预留足够的有害样本（确保评估有效）
-    3. 测试集和验证集保持与全集一致的有害/安全比例（按文档要求）
-    4. 训练集可按 train_safe_ratio 取 1:1 / 2:1 / 3:1 等，有害用满
-    5. use_doc_ratios=True 时严格按文档：80% 训练池 + 20% 测试；训练池内 72.2% 探针训练、11.1% 验证、16.7% 神经元分析；验证集保持原始分布
+    3. 测试集和验证集保持与全集一致的有害/安全比例
+    4. 训练集使用所有剩余数据（安全+有害），6:2:2 划分时在外部对探针训练集过采样至 1.5:1
     
     Args:
         texts: 文本列表
         labels: 标签列表，0=安全，1=有害
-        test_ratio: 测试集占总数据的比例（默认0.15；use_doc_ratios 时为 0.2）
-        val_ratio: 验证集占总数据的比例（默认0.15；use_doc_ratios 时表示占训练池的 0.111）
-        balance_train: 训练集是否按 train_safe_ratio 平衡
-        train_safe_ratio: 训练集安全/有害比例（1.0=1:1，2.0=2:1，3.0=3:1）
-        balance_val: 验证集是否平衡到1:1（默认False，保持有害/安全比例）
-        balance_test: 测试集是否平衡到1:1（默认False，保持有害/安全比例）
+        test_ratio: 测试集占总数据的比例（默认0.20，即 6:2:2）
+        val_ratio: 验证集占总数据的比例（默认0.20，即 6:2:2）
         min_test_toxic: 测试集最少有害样本数（默认100）
         min_val_toxic: 验证集最少有害样本数（默认100）
         seed: 随机种子
-        use_doc_ratios: 是否按文档 6.5:1:1.5 划分（80% 训练池、20% 测试；训练池内 72.2%/11.1%/16.7%）
         use_ratio_6_2_2: 是否按 6:2:2 分层划分（60% 训练、20% 验证、20% 测试，每份有害/安全比例与总体相同）
     
     Returns:
@@ -148,7 +174,7 @@ def split_data_optimized(
         raise ValueError("数据列表不能为空")
     if len(texts) != len(labels):
         raise ValueError(f"文本数量({len(texts)})与标签数量({len(labels)})不匹配")
-    if not use_doc_ratios and not use_ratio_6_2_2 and not use_ratio_6_2_2_full_train:
+    if not use_ratio_6_2_2 and not use_ratio_6_2_2_full_train:
         if not (0 < test_ratio < 1):
             raise ValueError(f"test_ratio 必须在 (0, 1) 之间，当前值: {test_ratio}")
         if not (0 < val_ratio < 1):
@@ -166,7 +192,7 @@ def split_data_optimized(
     print(f"[Data Analysis] 总数据: {total_samples} 个样本")
     print(f"[Data Analysis] 安全: {num_safe_total} ({safe_ratio_total:.1%}), 有害: {num_toxic_total} ({toxic_ratio_total:.1%})")
     
-    # 6:2:2 剩余全作训练集：60% 训练、20% 验证、20% 测试，分层；训练集可按 train_safe_ratio_622_full 控制安全:有害比例
+    # 6:2:2 剩余全作训练集：60% 训练、20% 验证、20% 测试，分层；训练集用满 60% 剩余数据，后续过采样至 1.5:1
     if use_ratio_6_2_2_full_train:
         rng = random.Random(seed)
         safe_indices = [i for i, label in enumerate(labels) if label == 0]
@@ -174,7 +200,6 @@ def split_data_optimized(
         rng.shuffle(safe_indices)
         random.Random(seed + 1).shuffle(toxic_indices)
         n_safe, n_toxic = len(safe_indices), len(toxic_indices)
-        # 分层 60% 训练 / 20% 验证 / 20% 测试，每份有害/安全比例与总体相同
         t_safe = int(n_safe * 0.6)
         v_safe = int(n_safe * 0.2)
         t_toxic = int(n_toxic * 0.6)
@@ -185,18 +210,7 @@ def split_data_optimized(
         train_toxic_idx = toxic_indices[:t_toxic]
         val_toxic_idx = toxic_indices[t_toxic : t_toxic + v_toxic]
         test_toxic_idx = toxic_indices[t_toxic + v_toxic :]
-        # 训练集比例：None 表示用满 60% 不讲究；否则 安全:有害 = train_safe_ratio_622_full : 1
-        if train_safe_ratio_622_full is not None and train_safe_ratio_622_full > 0:
-            n_toxic_train = len(train_toxic_idx)
-            n_safe_train_want = min(int(round(n_toxic_train * train_safe_ratio_622_full)), len(train_safe_idx))
-            train_safe_used = train_safe_idx[:n_safe_train_want]
-            probe_train_indices = train_safe_used + train_toxic_idx
-            ratio_desc = f"安全:有害={train_safe_ratio_622_full}:1"
-            n_train_safe = len(train_safe_used)
-        else:
-            probe_train_indices = train_safe_idx + train_toxic_idx
-            ratio_desc = "不讲究比例(自然分布)"
-            n_train_safe = len(train_safe_idx)
+        probe_train_indices = train_safe_idx + train_toxic_idx
         probe_val_indices = val_safe_idx + val_toxic_idx
         test_indices = test_safe_idx + test_toxic_idx
         rng.shuffle(probe_train_indices)
@@ -211,8 +225,8 @@ def split_data_optimized(
         pct_train = 100.0 * len(probe_train_texts) / total_samples
         pct_val = 100.0 * len(probe_val_texts) / total_samples
         pct_test = 100.0 * len(test_texts) / total_samples
-        print(f"[Split Strategy] 6:2:2 剩余全作训练集 (use_ratio_6_2_2_full_train=True)：训练 {pct_train:.1f}%、验证 {pct_val:.1f}%、测试 {pct_test:.1f}%，训练集 {ratio_desc}")
-        print(f"  训练集 ({pct_train:.1f}%): {len(probe_train_texts)} - 安全={n_train_safe}, 有害={len(train_toxic_idx)}")
+        print(f"[Split Strategy] 6:2:2 剩余全作训练集：训练 {pct_train:.1f}%、验证 {pct_val:.1f}%、测试 {pct_test:.1f}%；训练集用满剩余数据，后续过采样至 1.5:1")
+        print(f"  训练集 ({pct_train:.1f}%): {len(probe_train_texts)} - 安全={len(train_safe_idx)}, 有害={len(train_toxic_idx)}")
         print(f"  验证集 ({pct_val:.1f}%): {len(probe_val_texts)} - 安全={len(val_safe_idx)}, 有害={len(val_toxic_idx)}")
         print(f"  测试集 ({pct_test:.1f}%): {len(test_texts)} - 安全={len(test_safe_idx)}, 有害={len(test_toxic_idx)}")
         return probe_train_texts, probe_train_labels, probe_val_texts, probe_val_labels, test_texts, test_labels
@@ -265,75 +279,6 @@ def split_data_optimized(
         print(f"  Task-Test ({pct_test:.1f}%): {len(test_texts)} - 安全={len(test_safe_idx)}, 有害={len(test_toxic_idx)}")
         return probe_train_texts, probe_train_labels, probe_val_texts, probe_val_labels, test_texts, test_labels
     
-    # 按文档划分：80% 训练池 + 20% 测试；训练池内 72.2% 探针训练、11.1% 验证、16.7% 神经元分析；测试/验证均保持有害安全比例
-    if use_doc_ratios:
-        doc_test_ratio = 0.2
-        doc_probe_val_ratio_in_pool = 0.111   # 探针验证集占训练池 11.1%
-        doc_probe_train_ratio_in_pool = 0.722  # 探针训练池占训练池 72.2%，剩余 16.7% 为神经元分析集（不返回）
-        rng = random.Random(seed)
-        safe_indices = [i for i, label in enumerate(labels) if label == 0]
-        toxic_indices = [i for i, label in enumerate(labels) if label == 1]
-        rng.shuffle(safe_indices)
-        random.Random(seed + 1).shuffle(toxic_indices)
-        # 第一步：80% 训练池 + 20% 测试，均保持全集有害/安全比例
-        test_size = int(total_samples * doc_test_ratio)
-        test_toxic_size = max(min_test_toxic, min(int(test_size * toxic_ratio_total), num_toxic_total))
-        test_safe_size = min(test_size - test_toxic_size, int(test_toxic_size * safe_ratio_total / toxic_ratio_total) if toxic_ratio_total > 0 else test_size)
-        test_toxic_size = min(test_toxic_size, num_toxic_total)
-        test_safe_size = min(test_safe_size, num_safe_total)
-        if test_safe_size + test_toxic_size > test_size:
-            test_safe_size = test_size - test_toxic_size
-        test_safe_idx = safe_indices[:test_safe_size]
-        test_toxic_idx = toxic_indices[:test_toxic_size]
-        pool_safe = safe_indices[test_safe_size:]
-        pool_toxic = toxic_indices[test_toxic_size:]
-        pool_size = len(pool_safe) + len(pool_toxic)
-        pool_toxic_ratio = len(pool_toxic) / pool_size if pool_size > 0 else toxic_ratio_total
-        pool_safe_ratio = 1.0 - pool_toxic_ratio
-        # 第二步：从训练池中按比例划出 11.1% 验证（保持有害/安全比例）、72.2% 探针训练池（保持比例），剩余 16.7% 为神经元分析集
-        val_in_pool_size = int(pool_size * doc_probe_val_ratio_in_pool)
-        val_toxic_cnt = max(min_val_toxic, min(int(val_in_pool_size * pool_toxic_ratio), len(pool_toxic)))
-        val_safe_cnt = min(val_in_pool_size - val_toxic_cnt, len(pool_safe))
-        val_toxic_cnt = min(val_toxic_cnt, len(pool_toxic))
-        if val_safe_cnt + val_toxic_cnt > val_in_pool_size:
-            val_safe_cnt = val_in_pool_size - val_toxic_cnt
-        probe_val_safe_idx = pool_safe[:val_safe_cnt]
-        probe_val_toxic_idx = pool_toxic[:val_toxic_cnt]
-        train_pool_size = int(pool_size * doc_probe_train_ratio_in_pool)
-        train_pool_toxic_cnt = min(int(train_pool_size * pool_toxic_ratio), len(pool_toxic) - val_toxic_cnt)
-        train_pool_safe_cnt = min(train_pool_size - train_pool_toxic_cnt, len(pool_safe) - val_safe_cnt)
-        train_pool_toxic_cnt = min(train_pool_toxic_cnt, len(pool_toxic) - val_toxic_cnt)
-        if train_pool_safe_cnt + train_pool_toxic_cnt > train_pool_size:
-            train_pool_safe_cnt = train_pool_size - train_pool_toxic_cnt
-        probe_train_pool_safe = pool_safe[val_safe_cnt:val_safe_cnt + train_pool_safe_cnt]
-        probe_train_pool_toxic = pool_toxic[val_toxic_cnt:val_toxic_cnt + train_pool_toxic_cnt]
-        remaining_toxic_for_train = len(probe_train_pool_toxic)
-        remaining_safe_for_train = len(probe_train_pool_safe)
-        if remaining_toxic_for_train == 0:
-            raise ValueError("按文档划分后探针训练池中无有害样本，请检查数据或放宽 min_val_toxic/min_test_toxic。")
-        if balance_train:
-            train_safe_size = min(int(remaining_toxic_for_train * train_safe_ratio), remaining_safe_for_train)
-            train_toxic_size = remaining_toxic_for_train
-        else:
-            train_safe_size = remaining_safe_for_train
-            train_toxic_size = remaining_toxic_for_train
-        probe_train_safe_idx = probe_train_pool_safe[:train_safe_size]
-        probe_train_toxic_idx = probe_train_pool_toxic[:train_toxic_size]
-        probe_train_indices = probe_train_safe_idx + probe_train_toxic_idx
-        probe_val_indices = probe_val_safe_idx + probe_val_toxic_idx
-        test_indices = test_safe_idx + test_toxic_idx
-        probe_train_texts = [texts[i] for i in probe_train_indices]
-        probe_train_labels = [labels[i] for i in probe_train_indices]
-        probe_val_texts = [texts[i] for i in probe_val_indices]
-        probe_val_labels = [labels[i] for i in probe_val_indices]
-        test_texts = [texts[i] for i in test_indices]
-        test_labels = [labels[i] for i in test_indices]
-        print(f"[Split Strategy] 按文档划分 (use_doc_ratios=True): 80% 训练池 + 20% 测试；训练池内 72.2% 探针训练、11.1% 验证、16.7% 神经元分析")
-        print(f"  测试集 (20%): {len(test_texts)} - 安全={len(test_safe_idx)}, 有害={len(test_toxic_idx)}，保持有害/安全比例")
-        print(f"  验证集 (训练池 11.1%): {len(probe_val_texts)} - 安全={len(probe_val_safe_idx)}, 有害={len(probe_val_toxic_idx)}，保持有害/安全比例")
-        print(f"  探针训练集 (从训练池 72.2% 中按 train_safe_ratio={train_safe_ratio} 取): {len(probe_train_texts)} - 安全={len(probe_train_safe_idx)}, 有害={len(probe_train_toxic_idx)}")
-        return probe_train_texts, probe_train_labels, probe_val_texts, probe_val_labels, test_texts, test_labels
-    
     # 根据数据量自动调整最小值要求（避免训练集为空）
     # 策略：确保训练集至少有 min(50, num_toxic_total * 0.2) 个有害样本
     min_train_toxic_required = min(50, max(20, int(num_toxic_total * 0.2)))  # 训练集至少需要20%或50个（取较小值）
@@ -374,7 +319,7 @@ def split_data_optimized(
     rng.shuffle(safe_indices)
     random.Random(seed + 1).shuffle(toxic_indices)
     
-    # 第一步：先按15%:85%划分测试集和剩余数据
+    # 第一步：先按 20%:80% 划分测试集和剩余数据（6:2:2 时 test_ratio=0.20）
     test_size = int(total_samples * test_ratio)
     
     # 测试集中的有害样本数 = 测试集总样本数 * (总有害样本数 / 总样本数)
@@ -417,7 +362,7 @@ def split_data_optimized(
     test_toxic_idx = toxic_indices[:test_toxic_size]
     test_indices = test_safe_idx + test_toxic_idx
     
-    # 剩余数据（85%）
+    # 剩余数据（80%，用于验证+训练）
     remaining_safe_indices = safe_indices[test_safe_size:]
     remaining_toxic_indices = toxic_indices[test_toxic_size:]
     remaining_samples = len(remaining_safe_indices) + len(remaining_toxic_indices)
@@ -433,7 +378,7 @@ def split_data_optimized(
     print(f"    有害样本数: {test_toxic}个 {'✓ 满足最小值' if test_toxic >= min_test_toxic else f'⚠ 低于最小值({min_test_toxic})'}")
     print(f"  剩余数据 ({1-test_ratio:.0%}): {remaining_samples}个 - 安全={len(remaining_safe_indices)}, 有害={len(remaining_toxic_indices)}")
     
-    # 第二步：从剩余数据（85%）中划分验证集
+    # 第二步：从剩余数据中划分验证集（验证集占总数据 val_ratio，默认 20%）
     # 验证集大小基于总数据的比例
     val_size = int(total_samples * val_ratio)
     
@@ -489,65 +434,25 @@ def split_data_optimized(
     train_safe_indices = remaining_safe_indices[val_safe_needed:]
     train_toxic_indices = remaining_toxic_indices[val_toxic_needed:]
     
-    # 第三步：划分训练集（最大化使用所有剩余数据）
+    # 第三步：划分训练集（使用所有剩余数据）
     remaining_toxic_for_train = len(train_toxic_indices)
     remaining_safe_for_train = len(train_safe_indices)
     
-    print(f"\n[Split Strategy] 第三步：划分训练集")
+    print(f"\n[Split Strategy] 第三步：划分训练集（使用全部剩余数据，6:2:2 时后续过采样至 1.5:1）")
     print(f"  剩余数据: 安全={remaining_safe_for_train}, 有害={remaining_toxic_for_train}")
-    print(f"  说明: 训练集将使用所有剩余的有害样本({remaining_toxic_for_train}个)")
     
-    # 检查训练集是否有足够的样本
     if remaining_toxic_for_train == 0:
-        error_msg = (
-            f"\n[错误] 训练集为空！无法进行训练。\n"
-            f"原因: 测试集和验证集的最小值要求占用了所有有害样本。\n"
-            f"  - 测试集有害样本: {test_toxic}个 (最小值要求: {min_test_toxic})\n"
-            f"  - 验证集有害样本: {val_toxic_needed}个 (最小值要求: {min_val_toxic})\n"
-            f"  - 总有害样本: {num_toxic_total}个\n"
-            f"  - 剩余有害样本: {remaining_toxic_for_train}个\n\n"
-            f"解决方案:\n"
-            f"  1. 增加数据量 (--max_samples 建议 >= 5000)\n"
-            f"  2. 降低最小值要求 (--min_test_toxic 和 --min_val_toxic，建议根据数据量调整)\n"
-            f"  3. 降低训练集比例要求 (--train_safe_ratio，使用更小的比例如 1.0 或 2.0)\n"
+        raise ValueError(
+            f"训练集无有害样本。测试集有害={test_toxic}、验证集有害={val_toxic_needed}、总有害={num_toxic_total}。"
+            f"可增加数据量或降低 --min_test_toxic / --min_val_toxic。"
         )
-        raise ValueError(error_msg)
     
-    if balance_train:
-        # 训练集使用所有剩余的有害样本，安全样本按比例使用
-        train_toxic_size = remaining_toxic_for_train  # 使用所有剩余的有害样本（不会超过）
-        train_safe_size = min(
-            int(train_toxic_size * train_safe_ratio),  # 按比例计算安全样本数
-            remaining_safe_for_train  # 不超过可用数量
-        )
-        
-        # 确保不会超过剩余数量
-        assert train_toxic_size <= remaining_toxic_for_train, f"训练集有害样本数({train_toxic_size})不能超过剩余数量({remaining_toxic_for_train})"
-        assert train_safe_size <= remaining_safe_for_train, f"训练集安全样本数({train_safe_size})不能超过剩余数量({remaining_safe_for_train})"
-        
-        probe_train_safe_idx = train_safe_indices[:train_safe_size]
-        probe_train_toxic_idx = train_toxic_indices[:train_toxic_size]
-        probe_train_indices = probe_train_safe_idx + probe_train_toxic_idx
-        
-        # 统计未使用的数据
-        unused_safe = remaining_safe_for_train - train_safe_size
-        unused_toxic = 0  # 所有有害样本都被使用
-        
-        ratio_desc = f"1:{train_safe_ratio:.1f}" if train_safe_ratio != 1.0 else "1:1"
-        print(f"  训练集 (比例={ratio_desc}): 安全={train_safe_size}, 有害={train_toxic_size}, 总计={len(probe_train_indices)}")
-        print(f"    使用所有剩余有害样本: {train_toxic_size}/{remaining_toxic_for_train} ✓")
-        print(f"    安全/有害比例: {train_safe_size/train_toxic_size:.2f}:1" if train_toxic_size > 0 else "N/A")
-        print(f"    说明: 训练集有害样本数 = 剩余有害样本数，不会超过总数据的有害样本数")
-        if unused_safe > 0:
-            print(f"  未使用安全样本: {unused_safe}个（安全/有害比例={train_safe_ratio:.1f}:1）")
-    else:
-        # 训练集使用所有剩余数据（保持原始分布）
-        probe_train_safe_idx = train_safe_indices
-        probe_train_toxic_idx = train_toxic_indices
-        probe_train_indices = probe_train_safe_idx + probe_train_toxic_idx
-        
-        unused_safe = 0
-        unused_toxic = 0
+    probe_train_indices = train_safe_indices + train_toxic_indices
+    probe_train_safe_idx = train_safe_indices
+    probe_train_toxic_idx = train_toxic_indices
+    unused_safe = 0
+    unused_toxic = 0
+    print(f"  训练集: 安全={remaining_safe_for_train}, 有害={remaining_toxic_for_train}, 总计={len(probe_train_indices)}")
     
     # 提取数据
     probe_train_texts = [texts[i] for i in probe_train_indices]
@@ -579,16 +484,6 @@ def split_data_optimized(
     print(f"    有害比例: {val_actual_ratio_final:.1%} (总数据: {toxic_ratio_total:.1%}, 差异: {abs(val_actual_ratio_final - toxic_ratio_total):.2%})")
     train_ratio_actual_val = probe_train_safe / probe_train_toxic if probe_train_toxic > 0 else 0
     print(f"  训练集: {len(probe_train_texts)} ({train_ratio_actual:.1%}) - 安全={probe_train_safe}, 有害={probe_train_toxic}")
-    if balance_train:
-        if probe_train_safe == probe_train_toxic:
-            print(f"    [平衡到1:1]")
-        else:
-            print(f"    [比例={train_ratio_actual_val:.1f}:1]")
-        print(f"    使用所有剩余有害样本: {probe_train_toxic}/{remaining_toxic_for_train} ✓")
-        print(f"    说明: 训练集有害样本数 = 剩余有害样本数，不会超过总数据的有害样本数")
-    else:
-        train_ratio_final = probe_train_toxic / len(probe_train_texts) if len(probe_train_texts) > 0 else 0
-        print(f"    有害比例: {train_ratio_final:.1%}")
     
     # 数据使用情况
     total_used = len(probe_train_texts) + len(probe_val_texts) + len(test_texts)
@@ -599,8 +494,6 @@ def split_data_optimized(
     print(f"  已使用: {total_used}/{total_samples} ({usage_rate:.1f}%)")
     if unused > 0:
         print(f"  未使用: {unused}个样本 (安全={unused_safe}, 有害={unused_toxic})")
-        if unused_safe > 0 and balance_train:
-            print(f"  [Info] 未使用的样本主要是安全样本（因为训练集需要平衡到1:1）")
         if unused_toxic > 0:
             print(f"  [Warning] 有{unused_toxic}个有害样本未使用！")
     else:
@@ -611,8 +504,7 @@ def split_data_optimized(
     test_toxic_ratio = test_toxic / len(test_texts) if len(test_texts) > 0 else 0
     val_toxic_ratio = probe_val_toxic / len(probe_val_texts) if len(probe_val_texts) > 0 else 0
     val_has_toxic = probe_val_toxic > 0
-    train_balanced = balance_train and probe_train_safe == probe_train_toxic
-    
+
     # 检查比例一致性
     test_ratio_diff = abs(test_toxic_ratio - toxic_ratio_total)
     val_ratio_diff = abs(val_toxic_ratio - toxic_ratio_total)
@@ -632,8 +524,7 @@ def split_data_optimized(
     if unused > 0:
         print(f"     ⚠ 未使用: {unused}个样本 (安全={unused_safe}, 有害={unused_toxic})")
     
-    print(f"  4. 训练集:")
-    print(f"     ✓ 训练集平衡: {'是' if train_balanced else '否'}")
+    print(f"  4. 训练集: 使用全部剩余数据 (安全={probe_train_safe}, 有害={probe_train_toxic})")
     
     if not val_has_toxic:
         print(f"\n[Warning] ⚠️ 验证集没有有害样本！验证指标将无效！")
@@ -651,312 +542,6 @@ def split_data_optimized(
         print(f"\n[Summary] ✓ 所有检查通过：比例一致、有害样本充足、数据利用率最大化")
     else:
         print(f"\n[Summary] ⚠ 部分检查未通过，请查看上述详细信息")
-    
-    return probe_train_texts, probe_train_labels, probe_val_texts, probe_val_labels, test_texts, test_labels
-
-
-def split_data_improved(
-    texts: List[str],
-    labels: List[int],
-    test_ratio: float = 0.15,  # 降低测试集比例，使用更多数据
-    min_val_samples_per_class: int = 100,  # 验证集每类最少样本数
-    balance_train: bool = True,  # 训练集是否平衡
-    balance_val: bool = True,    # 验证集是否平衡（推荐True）
-    seed: int = 42,
-) -> Tuple[List[str], List[int], List[str], List[int], List[str], List[int]]:
-    """
-    改进的数据划分函数，解决数据使用率低和验证集不平衡问题
-    
-    策略：
-    1. 先为验证集预留足够的有害样本（确保验证集平衡）
-    2. 然后平衡训练集
-    3. 使用更多数据（降低测试集比例）
-    4. 确保所有数据都被使用（除了测试集）
-    
-    Args:
-        texts: 文本列表
-        labels: 标签列表，0=安全，1=有害
-        test_ratio: 测试集比例（默认0.15，即15%）
-        min_val_samples_per_class: 验证集每类最少样本数（默认100）
-        balance_train: 训练集是否平衡到1:1（默认True）
-        balance_val: 验证集是否平衡到1:1（默认True，推荐）
-        seed: 随机种子
-    
-    Returns:
-        (probe_train_texts, probe_train_labels, 
-         probe_val_texts, probe_val_labels,
-         test_texts, test_labels)
-    """
-    # 数据验证
-    if len(texts) == 0 or len(labels) == 0:
-        raise ValueError("数据列表不能为空")
-    if len(texts) != len(labels):
-        raise ValueError(f"文本数量({len(texts)})与标签数量({len(labels)})不匹配")
-    if not (0 < test_ratio < 1):
-        raise ValueError(f"test_ratio 必须在 (0, 1) 之间，当前值: {test_ratio}")
-    
-    rng = random.Random(seed)
-    indices = list(range(len(texts)))
-    rng.shuffle(indices)
-    
-    # 第一步：总体划分 - 训练集 + 测试集
-    test_size = int(len(indices) * test_ratio)
-    test_indices = indices[:test_size]
-    train_indices = indices[test_size:]
-    
-    # 提取训练集数据
-    train_texts = [texts[i] for i in train_indices]
-    train_labels = [labels[i] for i in train_indices]
-    
-    # 分离安全样本和有害样本
-    safe_indices = [i for i, label in enumerate(train_labels) if label == 0]
-    toxic_indices = [i for i, label in enumerate(train_labels) if label == 1]
-    
-    num_safe = len(safe_indices)
-    num_toxic = len(toxic_indices)
-    total_train = len(train_indices)
-    
-    print(f"[Split] 总体划分: 训练集={total_train}, 测试集={len(test_indices)} (比例={test_ratio:.1%})")
-    print(f"[Split] 训练集中: 安全={num_safe} ({num_safe/total_train:.1%}), "
-          f"有害={num_toxic} ({num_toxic/total_train:.1%})")
-    
-    # 打乱
-    safe_shuffled = safe_indices.copy()
-    toxic_shuffled = toxic_indices.copy()
-    rng.shuffle(safe_shuffled)
-    random.Random(seed + 1).shuffle(toxic_shuffled)
-    
-    # 第二步：先为验证集预留样本（优先保证验证集质量）
-    if balance_val:
-        # 验证集平衡到1:1
-        val_per_class = min(min_val_samples_per_class, num_toxic // 2)  # 受限于有害样本数量
-        if val_per_class < 50:
-            print(f"[Warning] 有害样本太少，验证集每类只能有{val_per_class}个样本")
-        
-        probe_val_safe_idx = safe_shuffled[:val_per_class]
-        probe_val_toxic_idx = toxic_shuffled[:val_per_class]
-        probe_val_indices = probe_val_safe_idx + probe_val_toxic_idx
-        
-        # 剩余数据用于训练
-        remaining_safe = safe_shuffled[val_per_class:]
-        remaining_toxic = toxic_shuffled[val_per_class:]
-    else:
-        # 验证集保持原始分布，但确保包含足够的有害样本
-        val_toxic_size = min(min_val_samples_per_class, num_toxic)
-        val_safe_size = int(val_toxic_size * (num_safe / num_toxic))  # 按原始比例
-        
-        probe_val_safe_idx = safe_shuffled[:val_safe_size]
-        probe_val_toxic_idx = toxic_shuffled[:val_toxic_size]
-        probe_val_indices = probe_val_safe_idx + probe_val_toxic_idx
-        
-        remaining_safe = safe_shuffled[val_safe_size:]
-        remaining_toxic = toxic_shuffled[val_toxic_size:]
-    
-    # 第三步：划分训练集
-    if balance_train:
-        # 训练集平衡到1:1，使用所有剩余的有害样本
-        train_toxic_size = len(remaining_toxic)
-        train_safe_size = train_toxic_size  # 平衡到1:1
-        
-        # 如果安全样本不够，使用所有剩余的安全样本
-        if train_safe_size > len(remaining_safe):
-            train_safe_size = len(remaining_safe)
-            print(f"[Warning] 安全样本不足，训练集将不平衡: {train_safe_size}:{train_toxic_size}")
-        
-        probe_train_safe_idx = remaining_safe[:train_safe_size]
-        probe_train_toxic_idx = remaining_toxic[:train_toxic_size]
-        probe_train_indices = probe_train_safe_idx + probe_train_toxic_idx
-    else:
-        # 训练集保持原始分布，使用所有剩余数据
-        probe_train_safe_idx = remaining_safe
-        probe_train_toxic_idx = remaining_toxic
-        probe_train_indices = probe_train_safe_idx + probe_train_toxic_idx
-    
-    # 提取数据
-    probe_train_texts = [train_texts[i] for i in probe_train_indices]
-    probe_train_labels = [train_labels[i] for i in probe_train_indices]
-    probe_val_texts = [train_texts[i] for i in probe_val_indices]
-    probe_val_labels = [train_labels[i] for i in probe_val_indices]
-    test_texts = [texts[i] for i in test_indices]
-    test_labels = [labels[i] for i in test_indices]
-    
-    # 统计信息
-    probe_train_safe = sum(1 for l in probe_train_labels if l == 0)
-    probe_train_toxic = sum(1 for l in probe_train_labels if l == 1)
-    probe_val_safe = sum(1 for l in probe_val_labels if l == 0)
-    probe_val_toxic = sum(1 for l in probe_val_labels if l == 1)
-    
-    print(f"[Split] 探针训练集: {len(probe_train_texts)} "
-          f"(安全={probe_train_safe}, 有害={probe_train_toxic}) "
-          f"{'- 已平衡到1:1' if balance_train and probe_train_safe == probe_train_toxic else ''}")
-    print(f"[Split] 探针验证集: {len(probe_val_texts)} "
-          f"(安全={probe_val_safe} ({probe_val_safe/len(probe_val_texts):.1%}), "
-          f"有害={probe_val_toxic} ({probe_val_toxic/len(probe_val_texts):.1%})) "
-          f"{'- 已平衡到1:1' if balance_val and probe_val_safe == probe_val_toxic else ''}")
-    
-    # 验证划分结果
-    total_used = len(probe_train_texts) + len(probe_val_texts) + len(test_texts)
-    unused = len(texts) - total_used
-    usage_rate = total_used / len(texts) * 100
-    
-    print(f"[Split] 数据使用情况: 已使用={total_used}/{len(texts)} ({usage_rate:.1f}%)")
-    if unused > 0:
-        print(f"[Split] 未使用数据: {unused}个样本（已保留用于未来扩展）")
-    
-    # 检查验证集是否有有害样本
-    if probe_val_toxic == 0:
-        print(f"[Warning] ⚠️ 验证集没有有害样本！验证指标将无效！")
-        print(f"[Warning] 建议: 减少min_val_samples_per_class或增加数据集中的有害样本")
-    
-    return probe_train_texts, probe_train_labels, probe_val_texts, probe_val_labels, test_texts, test_labels
-
-
-def split_data_according_to_doc(
-    texts: List[str],
-    labels: List[int],
-    test_ratio: float = 0.2,
-    probe_train_ratio: float = 0.722,  # 6.5/(6.5+1+1.5) = 0.722
-    probe_val_ratio: float = 0.111,     # 1/(6.5+1+1.5) = 0.111
-    balance_probe_train: bool = True,   # 探针训练集是否平衡到1:1
-    seed: int = 42,
-) -> Tuple[List[str], List[int], List[str], List[int], List[str], List[int]]:
-    """
-    按照数据集划分文档进行数据划分
-    
-    划分流程：
-    1. 总体划分：训练集(80%) + 测试集(20%) - 测试集完全隔离
-    2. 从训练集中划分：探针训练集(72.2%) + 探针验证集(11.1%) + 神经元分析集(16.7%)
-    
-    Args:
-        texts: 文本列表
-        labels: 标签列表，0=安全，1=有害
-        test_ratio: 测试集比例（默认0.2，即20%）
-        probe_train_ratio: 探针训练集在训练集中的比例（默认0.722，即72.2%）
-        probe_val_ratio: 探针验证集在训练集中的比例（默认0.111，即11.1%）
-        balance_probe_train: 是否将探针训练集平衡到1:1（默认True）
-        seed: 随机种子
-    
-    Returns:
-        (probe_train_texts, probe_train_labels, 
-         probe_val_texts, probe_val_labels,
-         test_texts, test_labels)
-    
-    Raises:
-        ValueError: 如果数据为空或比例不合理
-    """
-    # 数据验证
-    if len(texts) == 0 or len(labels) == 0:
-        raise ValueError("数据列表不能为空")
-    if len(texts) != len(labels):
-        raise ValueError(f"文本数量({len(texts)})与标签数量({len(labels)})不匹配")
-    if not (0 < test_ratio < 1):
-        raise ValueError(f"test_ratio 必须在 (0, 1) 之间，当前值: {test_ratio}")
-    if not (0 < probe_train_ratio < 1) or not (0 < probe_val_ratio < 1):
-        raise ValueError(f"比例必须在 (0, 1) 之间")
-    if probe_train_ratio + probe_val_ratio > 1.0:
-        raise ValueError(f"探针训练集({probe_train_ratio:.1%}) + 验证集({probe_val_ratio:.1%}) > 100%，"
-                        f"剩余空间不足用于神经元分析集")
-    # 第一步：总体划分 - 训练集(80%) + 测试集(20%)
-    rng = random.Random(seed)
-    indices = list(range(len(texts)))
-    rng.shuffle(indices)
-    
-    test_size = int(len(indices) * test_ratio)
-    test_indices = indices[:test_size]
-    train_indices = indices[test_size:]
-    
-    # 提取训练集数据
-    train_texts = [texts[i] for i in train_indices]
-    train_labels = [labels[i] for i in train_indices]
-    
-    # 分离安全样本和有害样本（在训练集中的索引）
-    safe_indices = [i for i, label in enumerate(train_labels) if label == 0]
-    toxic_indices = [i for i, label in enumerate(train_labels) if label == 1]
-    
-    num_safe = len(safe_indices)
-    num_toxic = len(toxic_indices)
-    total_train = len(train_indices)
-    
-    print(f"[Split] 总体划分: 训练集={total_train}, 测试集={len(test_indices)} (比例={test_ratio:.1%})")
-    print(f"[Split] 训练集中: 安全={num_safe} ({num_safe/total_train:.1%}), "
-          f"有害={num_toxic} ({num_toxic/total_train:.1%})")
-    print(f"[Split] 测试集已隔离，不用于探针训练")
-    
-    # 第二步：从训练集中划分探针训练集和验证集
-    # 计算目标大小
-    probe_train_size = int(total_train * probe_train_ratio)
-    probe_val_size = int(total_train * probe_val_ratio)
-    
-    # 探针训练集：平衡到1:1
-    if balance_probe_train:
-        # 计算每类可用的最大样本数（取较小值，确保1:1平衡）
-        min_class_size = min(num_safe, num_toxic)
-        probe_train_per_class = min(min_class_size, probe_train_size // 2)
-        
-        # 随机采样（使用不同的种子确保独立性）
-        safe_shuffled = safe_indices.copy()
-        toxic_shuffled = toxic_indices.copy()
-        rng.shuffle(safe_shuffled)
-        random.Random(seed + 1).shuffle(toxic_shuffled)
-        
-        # 探针训练集：每类取相同数量，确保1:1平衡
-        probe_train_safe_idx = safe_shuffled[:probe_train_per_class]
-        probe_train_toxic_idx = toxic_shuffled[:probe_train_per_class]
-        probe_train_indices = probe_train_safe_idx + probe_train_toxic_idx
-        
-        # 从剩余数据中划分验证集（保持原始分布）
-        remaining_safe = safe_shuffled[probe_train_per_class:]
-        remaining_toxic = toxic_shuffled[probe_train_per_class:]
-        
-        # 按原始比例采样验证集（82.3%:17.7%）
-        original_safe_ratio = num_safe / total_train
-        safe_val_size = min(int(probe_val_size * original_safe_ratio), len(remaining_safe))
-        toxic_val_size = min(probe_val_size - safe_val_size, len(remaining_toxic))
-        
-        probe_val_safe_idx = remaining_safe[:safe_val_size]
-        probe_val_toxic_idx = remaining_toxic[:toxic_val_size]
-        probe_val_indices = probe_val_safe_idx + probe_val_toxic_idx
-        
-        # 提取数据
-        probe_train_texts = [train_texts[i] for i in probe_train_indices]
-        probe_train_labels = [train_labels[i] for i in probe_train_indices]
-        probe_val_texts = [train_texts[i] for i in probe_val_indices]
-        probe_val_labels = [train_labels[i] for i in probe_val_indices]
-        
-        # 统计信息
-        probe_train_safe = sum(1 for l in probe_train_labels if l == 0)
-        probe_train_toxic = sum(1 for l in probe_train_labels if l == 1)
-        probe_val_safe = sum(1 for l in probe_val_labels if l == 0)
-        probe_val_toxic = sum(1 for l in probe_val_labels if l == 1)
-        
-        print(f"[Split] 探针训练集: {len(probe_train_texts)} "
-              f"(安全={probe_train_safe}, 有害={probe_train_toxic}) - 已平衡到1:1")
-        print(f"[Split] 探针验证集: {len(probe_val_texts)} "
-              f"(安全={probe_val_safe} ({probe_val_safe/len(probe_val_texts):.1%}), "
-              f"有害={probe_val_toxic} ({probe_val_toxic/len(probe_val_texts):.1%})) - 保持原始分布")
-    else:
-        # 不平衡模式：直接按比例划分（不推荐）
-        train_shuffled = train_indices.copy()
-        rng.shuffle(train_shuffled)
-        probe_train_indices = train_shuffled[:probe_train_size]
-        probe_val_indices = train_shuffled[probe_train_size:probe_train_size + probe_val_size]
-        
-        probe_train_texts = [train_texts[i] for i in probe_train_indices]
-        probe_train_labels = [train_labels[i] for i in probe_train_indices]
-        probe_val_texts = [train_texts[i] for i in probe_val_indices]
-        probe_val_labels = [train_labels[i] for i in probe_val_indices]
-        
-        print(f"[Split] 探针训练集: {len(probe_train_texts)} (未平衡)")
-        print(f"[Split] 探针验证集: {len(probe_val_texts)} (未平衡)")
-    
-    # 测试集（完全隔离，不用于训练）
-    test_texts = [texts[i] for i in test_indices]
-    test_labels = [labels[i] for i in test_indices]
-    
-    # 验证划分结果
-    total_used = len(probe_train_texts) + len(probe_val_texts) + len(test_texts)
-    if total_used != len(texts):
-        print(f"[Warning] 数据划分不完整: 已使用={total_used}, 总数={len(texts)}")
     
     return probe_train_texts, probe_train_labels, probe_val_texts, probe_val_labels, test_texts, test_labels
 
@@ -1030,37 +615,21 @@ def main():
         help="随机种子",
     )
     parser.add_argument(
-        "--use_improved_split",
-        action="store_true",
-        help="使用改进的数据划分函数（解决数据使用率低和验证集不平衡问题）",
-    )
-    parser.add_argument(
         "--test_ratio",
         type=float,
-        default=0.15,
-        help="测试集比例（使用改进划分时，默认0.15即15%）",
-    )
-    parser.add_argument(
-        "--min_val_samples_per_class",
-        type=int,
-        default=100,
-        help="验证集每类最少样本数（使用改进划分时，默认100）",
+        default=0.20,
+        help="测试集比例（默认 0.20 即 6:2:2 的 20%）",
     )
     parser.add_argument(
         "--val_ratio",
         type=float,
-        default=0.15,
-        help="验证集占总数据的比例（使用优化划分时，默认0.15即15%）",
+        default=0.20,
+        help="验证集占总数据的比例（默认 0.20 即 6:2:2 的 20%）",
     )
     parser.add_argument(
         "--use_optimized_split",
         action="store_true",
         help="使用优化的数据划分函数（优先分离验证集，自动计算最优比例，最大化数据利用率）",
-    )
-    parser.add_argument(
-        "--use_doc_ratios",
-        action="store_true",
-        help="按文档划分：80% 训练池+20% 测试，训练池内 72.2% 探针训练、11.1% 验证、16.7% 神经元分析；测试/验证保持有害安全比例。需与 --use_optimized_split 同时使用",
     )
     parser.add_argument(
         "--use_ratio_6_2_2",
@@ -1081,13 +650,7 @@ def main():
     parser.add_argument(
         "--use_ratio_6_2_2_full_train",
         action="store_true",
-        help="6:2:2 剩余全作训练集：60%% 训练、20%% 验证、20%% 测试；与 --use_optimized_split 同用",
-    )
-    parser.add_argument(
-        "--train_safe_ratio_622_full",
-        type=float,
-        default=1.5,
-        help="6:2:2 全训练时训练集安全:有害比例，默认 1.5；0 表示不讲究比例",
+        help="6:2:2 剩余全作训练集：60%% 训练、20%% 验证、20%% 测试；训练集用满剩余数据，后续过采样至 1.5:1",
     )
     parser.add_argument(
         "--min_test_toxic",
@@ -1100,12 +663,6 @@ def main():
         type=int,
         default=100,
         help="验证集最少有害样本数（使用优化划分时，默认100）",
-    )
-    parser.add_argument(
-        "--train_safe_ratio",
-        type=float,
-        default=1.0,
-        help="训练集安全/有害比例（默认1.0=1:1平衡，2.0=2:1，3.0=3:1，可提高数据利用率）",
     )
     parser.add_argument(
         "--hidden_states_cache",
@@ -1157,17 +714,15 @@ def main():
         print(f"[Data] Loaded {len(all_texts)} total samples")
         print(f"[Data] Safe={sum(1 for l in all_labels if l==0)}, Toxic={sum(1 for l in all_labels if l==1)}")
 
-        # 按照数据集划分文档进行划分
+        # 数据划分
+        data_split_method = "optimized_default"
         if args.use_optimized_split:
+            data_split_method = "use_optimized_split"
             print("\n" + "="*60)
             if args.use_ratio_6_2_2_full_train:
-                r = f"安全:有害={args.train_safe_ratio_622_full}:1" if args.train_safe_ratio_622_full > 0 else "不讲究比例"
-                print(f"使用 6:2:2 剩余全作训练集：训练 60%、验证 20%、测试 20%，训练集 {r}")
+                print("使用 6:2:2 剩余全作训练集：训练 60%、验证 20%、测试 20%，训练集用满剩余数据并过采样至 1.5:1")
             elif args.use_ratio_6_2_2:
                 print("使用 6:2:2 分层划分：训练 60%、验证 20%、测试 20%，每份有害/安全比例与总体相同")
-            elif args.use_doc_ratios:
-                print("使用按文档划分（80% 训练池+20% 测试，训练池内 72.2%/11.1%/16.7%）：")
-                print("测试集、验证集均保持与全集一致的有害/安全比例")
             else:
                 print("使用优化的数据划分策略（推荐）：")
                 print("1. 优先分离验证集（确保验证集平衡且足够大）")
@@ -1181,55 +736,32 @@ def main():
                     labels=all_labels,
                     test_ratio=args.test_ratio,
                     val_ratio=args.val_ratio,
-                    balance_train=True,
-                    train_safe_ratio=args.train_safe_ratio,
-                    balance_val=False,
-                    balance_test=False,
                     min_test_toxic=args.min_test_toxic,
                     min_val_toxic=args.min_val_toxic,
                     seed=args.seed,
-                    use_doc_ratios=args.use_doc_ratios,
                     use_ratio_6_2_2=args.use_ratio_6_2_2,
                     probe_val_ratio_in_train=args.probe_val_ratio_in_train,
                     use_ratio_6_2_2_full_train=args.use_ratio_6_2_2_full_train,
-                    train_safe_ratio_622_full=args.train_safe_ratio_622_full if args.train_safe_ratio_622_full > 0 else None,
-                )
-        elif args.use_improved_split:
-            print("\n" + "="*60)
-            print("使用改进的数据划分策略：")
-            print("1. 先为验证集预留足够的有害样本（确保验证集平衡）")
-            print("2. 然后平衡训练集")
-            print("3. 使用更多数据（降低测试集比例）")
-            print("="*60 + "\n")
-            print("⚠️  注意: 推荐使用 --use_optimized_split 以获得更好的数据利用率\n")
-            
-            probe_train_texts, probe_train_labels, probe_val_texts, probe_val_labels, test_texts, test_labels = \
-                split_data_improved(
-                    texts=all_texts,
-                    labels=all_labels,
-                    test_ratio=args.test_ratio,
-                    min_val_samples_per_class=args.min_val_samples_per_class,
-                    balance_train=True,
-                    balance_val=True,  # 验证集也平衡，确保评估有效
-                    seed=args.seed,
                 )
         else:
             print("\n" + "="*60)
-            print("按照数据集划分文档进行数据划分：")
-            print("1. 总体划分：训练集(80%) + 测试集(20%)")
-            print("2. 从训练集中划分：探针训练集(72.2%, 1:1平衡) + 探针验证集(11.1%, 原始分布)")
+            print("使用优化的数据划分策略（默认）：")
+            print("1. 优先分离验证集与测试集（确保有害样本足够）")
+            print("2. 训练集使用全部剩余数据")
             print("="*60 + "\n")
-            print("⚠️  注意: 此方法可能导致验证集不平衡，建议使用 --use_improved_split\n")
 
             probe_train_texts, probe_train_labels, probe_val_texts, probe_val_labels, test_texts, test_labels = \
-                split_data_according_to_doc(
+                split_data_optimized(
                     texts=all_texts,
                     labels=all_labels,
-                    test_ratio=0.2,
-                    probe_train_ratio=0.722,  # 6.5/(6.5+1+1.5)
-                    probe_val_ratio=0.111,    # 1/(6.5+1+1.5)
-                    balance_probe_train=True,
+                    test_ratio=args.test_ratio,
+                    val_ratio=args.val_ratio,
+                    min_test_toxic=args.min_test_toxic,
+                    min_val_toxic=args.min_val_toxic,
                     seed=args.seed,
+                    use_ratio_6_2_2=False,
+                    probe_val_ratio_in_train=args.probe_val_ratio_in_train,
+                    use_ratio_6_2_2_full_train=False,
                 )
 
         # 使用探针训练集和验证集
@@ -1238,15 +770,42 @@ def main():
         val_texts = probe_val_texts
         val_labels = probe_val_labels
 
+        # 训练集采用过采样方式：在 6:2:2 划分下，对有害样本过采样，使安全:有害 ≈ 1.5:1
+        if args.use_optimized_split and (args.use_ratio_6_2_2 or args.use_ratio_6_2_2_full_train):
+            texts, labels = oversample_probe_train(
+                texts, labels, target_safe_toxic_ratio=1.5, seed=args.seed
+            )
+
+        # 6:2:2 划分时对探针训练集过采样，使安全:有害 = 1.5:1
+        if args.use_optimized_split and (args.use_ratio_6_2_2 or args.use_ratio_6_2_2_full_train):
+            texts, labels = oversample_probe_train(
+                texts, labels, target_safe_toxic_ratio=1.5, seed=args.seed
+            )
+
         # 打乱探针训练集顺序
         combined = list(zip(texts, labels))
         random.Random(args.seed).shuffle(combined)
         texts, labels = zip(*combined)
         texts, labels = list(texts), list(labels)
 
-        print(f"\n[Final] 探针训练集: {len(texts)} samples")
-        print(f"[Final] 探针验证集: {len(val_texts)} samples")
-        print(f"[Final] 测试集（已隔离）: {len(test_texts)} samples\n")
+        # 训练日志：记录划分出的每个数据集个数及训练共使用的样本数
+        n_train = len(texts)
+        n_train_safe = sum(1 for l in labels if l == 0)
+        n_train_toxic = sum(1 for l in labels if l == 1)
+        n_val = len(val_texts)
+        n_val_safe = sum(1 for l in val_labels if l == 0)
+        n_val_toxic = sum(1 for l in val_labels if l == 1)
+        n_test = len(test_texts)
+        n_test_safe = sum(1 for l in test_labels if l == 0)
+        n_test_toxic = sum(1 for l in test_labels if l == 1)
+        print("\n[训练日志] 数据集划分")
+        print("  集合           | 总样本数 | 安全(0) | 有害(1)")
+        print("  ---------------+----------+---------+--------")
+        print(f"  探针训练集     | {n_train:8d} | {n_train_safe:7d} | {n_train_toxic:6d}")
+        print(f"  探针验证集     | {n_val:8d} | {n_val_safe:7d} | {n_val_toxic:6d}")
+        print(f"  测试集         | {n_test:8d} | {n_test_safe:7d} | {n_test_toxic:6d}")
+        print(f"  训练共使用样本数: {n_train}（探针训练时每层均使用上述 {n_train} 条数据）")
+        print(f"  验证集样本数: {n_val}（安全 {n_val_safe}，有害 {n_val_toxic}，用于调参）\n")
 
         # 加载模型与分词器（自动使用4-bit量化以节省显存）
         print("[Model] 正在加载LLM模型（使用4-bit量化）...")
@@ -1286,7 +845,7 @@ def main():
         )
 
     # 训练各层探针（使用探针训练集训练，探针验证集验证）
-    # 按照文档：探针训练集(1:1平衡)用于训练，探针验证集(原始分布)用于验证
+    # 探针训练集使用上游划分/采样后的分布（此处不再额外平衡），探针验证集保持原始分布
     train_indices = list(range(len(labels)))  # 使用全部探针训练集
     
     results = train_layer_probes(
@@ -1318,22 +877,30 @@ def main():
     probes_root = Path(args.output_dir) / "probes" / "llama-3-8b"
     probes_root.mkdir(parents=True, exist_ok=True)
 
+    # 本次训练各集样本数（用于每次训练记录）
+    run_sample_counts = {
+        "训练集": {"总样本数": len(labels), "安全": sum(1 for l in labels if l == 0), "有害": sum(1 for l in labels if l == 1)},
+        "验证集": {"总样本数": len(val_labels), "安全": sum(1 for l in val_labels if l == 0), "有害": sum(1 for l in val_labels if l == 1)},
+        "测试集": {"总样本数": len(test_texts), "安全": sum(1 for l in test_labels if l == 0), "有害": sum(1 for l in test_labels if l == 1)},
+    }
+
     # 从缓存加载时，data_file/max_samples/batch_size 优先从 meta 取；test 仅在未使用缓存时有值
     _meta = meta if args.hidden_states_cache else {}
     metadata = {
         "model_id": "llama-3-8b",
         "created_at": datetime.utcnow().isoformat(),
         "data_file": _meta.get("data_file", str(args.data_file)),
-        "data_split_method": "按照数据集划分文档（6.5:1:1.5方案）",
+        "data_split_method": _meta.get("data_split_method", "from_cache") if args.hidden_states_cache else data_split_method,
+        "本次训练各集样本数": run_sample_counts,
         "probe_train_samples": int(len(labels)),
-        "probe_train_safe": int(sum(1 for l in labels if l == 0)),
-        "probe_train_toxic": int(sum(1 for l in labels if l == 1)),
+        "probe_train_safe": int(run_sample_counts["训练集"]["安全"]),
+        "probe_train_toxic": int(run_sample_counts["训练集"]["有害"]),
         "probe_val_samples": int(len(val_labels)),
-        "probe_val_safe": int(sum(1 for l in val_labels if l == 0)),
-        "probe_val_toxic": int(sum(1 for l in val_labels if l == 1)),
+        "probe_val_safe": int(run_sample_counts["验证集"]["安全"]),
+        "probe_val_toxic": int(run_sample_counts["验证集"]["有害"]),
         "test_samples": int(len(test_texts)),
-        "test_safe": int(sum(1 for l in test_labels if l == 0)),
-        "test_toxic": int(sum(1 for l in test_labels if l == 1)),
+        "test_safe": int(run_sample_counts["测试集"]["安全"]),
+        "test_toxic": int(run_sample_counts["测试集"]["有害"]),
         "max_samples": _meta.get("max_samples", args.max_samples),
         "batch_size": _meta.get("batch_size", args.batch_size),
         "probe_batch_size": args.probe_batch_size,
@@ -1347,6 +914,30 @@ def main():
         metadata["hidden_states_cache"] = str(Path(args.hidden_states_cache).resolve())
     with (probes_root / "config.json").open("w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+    # 每次训练追加一条运行记录，便于对比多次训练的样本个数
+    runs_log_path = probes_root / "training_runs_log.json"
+    run_record = {
+        "created_at": metadata["created_at"],
+        "本次训练各集样本数": run_sample_counts,
+        "probe_train_samples": metadata["probe_train_samples"],
+        "probe_val_samples": metadata["probe_val_samples"],
+        "test_samples": metadata["test_samples"],
+    }
+    if runs_log_path.exists():
+        try:
+            with runs_log_path.open("r", encoding="utf-8") as f:
+                runs_log = json.load(f)
+        except (json.JSONDecodeError, TypeError):
+            runs_log = []
+        if not isinstance(runs_log, list):
+            runs_log = [runs_log]
+    else:
+        runs_log = []
+    runs_log.append(run_record)
+    with runs_log_path.open("w", encoding="utf-8") as f:
+        json.dump(runs_log, f, indent=2, ensure_ascii=False)
+    print(f"[训练日志] 本次训练样本数已写入 config.json 与 {runs_log_path.name}（共 {len(runs_log)} 次运行记录）")
 
 
 if __name__ == "__main__":
