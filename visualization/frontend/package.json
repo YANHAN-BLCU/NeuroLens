@@ -1,0 +1,45 @@
+{
+  "name": "neurolens-visualization",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext ts,tsx"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.3",
+    "@emotion/styled": "^11.11.0",
+    "@mui/icons-material": "^5.15.6",
+    "@mui/material": "^5.15.6",
+    "axios": "^1.6.5",
+    "cytoscape": "^3.28.1",
+    "echarts": "^5.4.3",
+    "echarts-for-react": "^3.0.2",
+    "plotly.js-dist-min": "^2.27.1",
+    "prismjs": "^1.29.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-markdown": "^9.0.1",
+    "react-plotly.js": "^2.6.0",
+    "react-router-dom": "^6.21.3",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/cytoscape": "^3.21.7",
+    "@types/node": "^20.11.5",
+    "@types/plotly.js-dist-min": "^2.12.0",
+    "@types/prismjs": "^1.26.3",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@typescript-eslint/eslint-plugin": "^6.19.1",
+    "@typescript-eslint/parser": "^6.19.1",
+    "@vitejs/plugin-react": "^4.2.1",
+    "eslint": "^8.56.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.12"
+  }
+}
+
