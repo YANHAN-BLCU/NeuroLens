@@ -8,7 +8,8 @@
 - 🛡️ **安全审核**：集成 Llama Guard 3 进行内容安全检测和过滤
 - 🧪 **SALAD 评估**：支持 SALAD-Bench 数据集评估，测试模型安全防护能力
 - 🔍 **线性探针训练**：训练分层线性探针，识别模型隐藏状态中的有害语义
-- 📊 **结果分析**：提供完整的评估结果分析和报告生成
+- 📊 **可视化系统**：提供 6 个可视化视图（指标、表征、层、神经元、实例、控制面板）
+- 📈 **结果分析**：提供完整的评估结果分析和报告生成
 - 🐳 **Docker 支持**：完整的容器化部署方案，便于实验环境复现
 - ⚙️ **灵活配置**：支持自定义模型参数、审核阈值和类别
 - 📈 **数据划分策略**：支持多种数据划分方案（6:2:2、6.5:1:1.5等）和过采样
@@ -21,15 +22,26 @@
 - **量化加速**：BitsAndBytes 4-bit 量化
 - **模型管理**：ModelScope（推荐，中国大陆访问更快）或 HuggingFace Transformers
 
+### 前端可视化
+- **框架**：React 18 + TypeScript
+- **UI 组件**：Material UI
+- **图表库**：ECharts、Plotly.js、Cytoscape.js
+- **状态管理**：Zustand
+- **构建工具**：Vite
+
+### 后端 API
+- **框架**：FastAPI
+- **数据处理**：NumPy、Pydantic
+
 ### 部署
 - **容器化**：Docker + NVIDIA CUDA 12.4
-- **模型管理**：ModelScope（推荐，中国大陆访问更快）或 HuggingFace Transformers
 
 ## 📋 前提条件
 
 - Python 3.9+
 - CUDA 12.4+ (推荐，用于 GPU 加速，8B 模型需要)
 - Docker (可选，用于容器化部署)
+- Node.js 18+ (用于前端开发)
 - ModelScope 账号（推荐，中国大陆访问更快）或 HuggingFace 账号，已申请模型访问权限
   - ModelScope: `LLM-Research/Meta-Llama-3-8B-Instruct` 与 `LLM-Research/Llama-Guard-3-8B`
   - HuggingFace: `meta-llama/Meta-Llama-3-8B-Instruct` 与 `meta-llama/Llama-Guard-3-8B`
@@ -46,7 +58,12 @@ cd NeuroBreak-Reproduction
 ### 2. 安装依赖
 
 ```bash
+# Python 依赖
 pip install -r requirements.txt
+
+# 前端依赖 (可选，仅开发可视化)
+cd visualization/frontend
+npm install
 ```
 
 ### 3. 配置环境变量
@@ -83,7 +100,7 @@ python scripts/download_models.py --all-8b
 
 ```bash
 # 在 Docker 容器内运行
-docker exec -it neurobreak-container /bin/bash
+docker exec -it neurolens /bin/bash
 cd /workspace
 python scripts/evaluate_salad_pipeline.py \
     --data_dir /workspace/data/salad/raw \
@@ -142,6 +159,21 @@ python scripts/train_linear_probes.py \
 python scripts/run_io_tests.py
 ```
 
+### 6. 启动可视化系统
+
+```bash
+# 启动后端 (端口 8000)
+cd visualization/backend
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+
+# 启动前端 (端口 5173)
+cd visualization/frontend
+npm run dev
+```
+
+访问 http://localhost:5173 查看可视化界面。
+
 ## 🐳 Docker 部署
 
 ### 构建镜像
@@ -156,7 +188,7 @@ docker build -t neurolens:v1 -f docker/Dockerfile .
 docker run -it --gpus all \
   -v /path/to/models:/workspace/ms_models \
   -e MODELSCOPE_TOKEN=your_token \
-  neurobreak:latest
+  neurolens:latest
 ```
 
 **注意**：
@@ -169,37 +201,62 @@ docker run -it --gpus all \
 ## 📁 项目结构
 
 ```
-NeuroBreak-Reproduction/
+NeuroLens/
 ├── engine/                 # 核心引擎
 │   ├── models.py          # 模型管理模块
-│   ├── assessment/       # 评估模块
-│   │   ├── evaluate.py   # 评估逻辑
+│   ├── assessment/        # 评估模块
+│   │   ├── evaluate.py    # 评估逻辑
 │   │   └── report.py     # 报告生成
-│   └── README.md          # 引擎文档
+│   ├── probes/           # 探针模块
+│   │   └── linear_probe.py
+│   └── engine/            # 引擎核心
 ├── scripts/               # 工具脚本
-│   ├── download_models.py # 模型下载脚本
-│   ├── evaluate_salad_pipeline.py # SALAD 评估脚本
-│   ├── train_linear_probes.py # 线性探针训练脚本
-│   ├── train_622_full.py # 6:2:2划分 + 过采样训练脚本
-│   ├── train_test_1_5_1.py # 6:2:2划分 + 测试集评估脚本
-│   ├── extract_hidden_states.py # 隐藏态提取脚本
-│   ├── analyze_salad_results.py # SALAD 结果分析脚本
+│   ├── download_models.py    # 模型下载脚本
+│   ├── evaluate_salad_pipeline.py  # SALAD 评估脚本
+│   ├── train_linear_probes.py      # 线性探针训练脚本
+│   ├── train_622_full.py           # 6:2:2划分 + 过采样训练脚本
+│   ├── train_test_1_5_1.py         # 6:2:2划分 + 测试集评估脚本
+│   ├── extract_hidden_states.py    # 隐藏态提取脚本
+│   ├── analyze_salad_results.py     # SALAD 结果分析脚本
 │   └── ...
-├── docs/                  # 文档目录
-│   ├── DEPLOYMENT_GUIDE.md # 部署指南
+├── visualization/         # 可视化系统
+│   ├── frontend/         # 前端应用
+│   │   ├── src/
+│   │   │   ├── components/  # 视图组件
+│   │   │   │   ├── ControlPanel.tsx     # 控制面板
+│   │   │   │   ├── MetricView.tsx       # 指标视图
+│   │   │   │   ├── RepresentationView.tsx  # 表征视图
+│   │   │   │   ├── LayerView.tsx        # 层视图
+│   │   │   │   ├── NeuronView.tsx      # 神经元视图
+│   │   │   │   └── InstanceView.tsx    # 实例视图
+│   │   │   ├── services/    # API 服务
+│   │   │   ├── store/       # 状态管理
+│   │   │   └── types/       # 类型定义
+│   │   └── package.json
+│   ├── backend/          # 后端 API
+│   │   ├── main.py
+│   │   └── requirements.txt
+│   └── README.md
+├── docs/                 # 文档目录
+│   ├── DEPLOYMENT_GUIDE.md       # 部署指南
 │   ├── SALAD_EVALUATION_GUIDE.md # SALAD 评估指南
-│   ├── SALAD_EVALUATION_ANALYSIS.md # SALAD 评估分析报告
+│   ├── SALAD_EVALUATION_ANALYSIS.md  # SALAD 评估分析报告
+│   ├── 探针训练逻辑.md            # 线性探针训练详细说明
 │   └── ...
-├── data/                  # 数据目录
+├── data/                 # 数据目录
 │   └── salad/            # SALAD-Bench 数据集
 ├── ms_models/            # 模型文件目录
 │   ├── LLM-Research/
 │   │   ├── Meta-Llama-3-8B-Instruct/
 │   │   └── Llama-Guard-3-8B/
-├── docker/                # Docker 配置
+├── docker/               # Docker 配置
 │   └── Dockerfile
-├── requirements.txt       # Python 依赖
-└── README.md             # 本文件
+├── configs/              # 配置文件
+│   └── runtime/
+├── logs/                 # 日志和评估结果
+├── outputs/              # 训练输出
+├── requirements.txt      # Python 依赖
+└── README.md            # 本文件
 ```
 
 ## 📚 文档
@@ -215,8 +272,6 @@ NeuroBreak-Reproduction/
 
 ### IO 测试
 
-运行 IO 测试：
-
 ```bash
 python scripts/run_io_tests.py
 ```
@@ -227,7 +282,7 @@ python scripts/run_io_tests.py
 
 ```bash
 # 在 Docker 容器内运行
-docker exec -it neurobreak-container /bin/bash
+docker exec -it neurolens /bin/bash
 cd /workspace
 python scripts/evaluate_salad_pipeline.py \
     --data_dir /workspace/data/salad/raw \
