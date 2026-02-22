@@ -13,64 +13,86 @@ import {
   Grid,
   Slider,
   Chip,
+  CircularProgress,
 } from '@mui/material';
 import { useStore } from '../store';
+import { representationApi } from '../services/api';
 
 const AVAILABLE_LAYERS = [0, 5, 10, 15, 20, 25, 30, 31];
 
 export const RepresentationView: React.FC = () => {
-  const { selectedLayer, setSelectedLayer, setIsLoading } = useStore();
+  const { selectedLayer, setSelectedLayer, representationData, setRepresentationData } = useStore();
   const [method, setMethod] = useState<'pca' | 'tsne'>('pca');
   const [perplexity, setPerplexity] = useState<number>(30);
-  const [data, setData] = useState<{ x: number[]; y: number[]; labels: number[] } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const plotRef = useRef<any>(null);
 
-  // Generate mock PCA/t-SNE data
+  // Fetch representation data from API
   useEffect(() => {
-    setIsLoading(true);
-    
-    // Simulate API call delay
-    const timer = setTimeout(() => {
-      const nSamples = 500;
-      const x: number[] = [];
-      const y: number[] = [];
-      const labels: number[] = [];
+    const fetchRepresentation = async () => {
+      setIsLoading(true);
+      setError(null);
       
-      // Generate clusters for safe and toxic samples
-      for (let i = 0; i < nSamples; i++) {
-        const isToxic = i > nSamples / 2;
-        
-        if (method === 'pca') {
-          // PCA: create two separated clusters
-          const baseX = isToxic ? 2 + Math.random() * 2 : -2 - Math.random() * 2;
-          const baseY = isToxic ? 1 + Math.random() : -1 - Math.random();
-          x.push(baseX + (Math.random() - 0.5) * 1.5);
-          y.push(baseY + (Math.random() - 0.5) * 1.5);
-        } else {
-          // t-SNE: create more compact clusters
-          const angle = Math.random() * Math.PI * 2;
-          const radius = isToxic ? 5 + Math.random() * 3 : 2 + Math.random() * 2;
-          x.push(Math.cos(angle) * radius + (Math.random() - 0.5) * 0.5);
-          y.push(Math.sin(angle) * radius + (Math.random() - 0.5) * 0.5);
-        }
-        
-        labels.push(isToxic ? 1 : 0);
+      try {
+        const data = await representationApi.getRepresentation({
+          layer_idx: selectedLayer,
+          method,
+          n_components: 2,
+        });
+        setRepresentationData(data);
+      } catch (err) {
+        console.error('Failed to fetch representation data:', err);
+        setError('Failed to load representation data. Using mock data.');
+        // Fallback to mock data on error
+        generateMockData();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchRepresentation();
+  }, [selectedLayer, method, perplexity]);
+
+  // Generate mock data fallback
+  const generateMockData = () => {
+    const nSamples = 500;
+    const x: number[] = [];
+    const y: number[] = [];
+    const labels: number[] = [];
+    
+    for (let i = 0; i < nSamples; i++) {
+      const isToxic = i > nSamples / 2;
+      
+      if (method === 'pca') {
+        const baseX = isToxic ? 2 + Math.random() * 2 : -2 - Math.random() * 2;
+        const baseY = isToxic ? 1 + Math.random() : -1 - Math.random();
+        x.push(baseX + (Math.random() - 0.5) * 1.5);
+        y.push(baseY + (Math.random() - 0.5) * 1.5);
+      } else {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = isToxic ? 5 + Math.random() * 3 : 2 + Math.random() * 2;
+        x.push(Math.cos(angle) * radius + (Math.random() - 0.5) * 0.5);
+        y.push(Math.sin(angle) * radius + (Math.random() - 0.5) * 0.5);
       }
       
-      setData({ x, y, labels });
-      setIsLoading(false);
-    }, 500);
+      labels.push(isToxic ? 1 : 0);
+    }
     
-    return () => clearTimeout(timer);
-  }, [selectedLayer, method, perplexity, setIsLoading]);
+    return { x, y, labels };
+  };
 
-  if (!data) {
-    return (
-      <Box sx={{ textAlign: 'center', py: 8 }}>
-        <Typography variant="h6" color="text.secondary">
-          Loading representation data...
-        </Typography>
-      </Box>
-    );
+  // Get data from API response or use mock data
+  let data = representationData ? {
+    x: representationData.coords.map(c => c[0]),
+    y: representationData.coords.map(c => c[1]),
+    labels: representationData.labels,
+  } : null;
+
+  // If no API data, use mock data
+  if (!data && !isLoading) {
+    const mock = generateMockData();
+    data = mock;
   }
 
   // Separate safe and toxic points
@@ -79,15 +101,17 @@ export const RepresentationView: React.FC = () => {
   const toxicX: number[] = [];
   const toxicY: number[] = [];
   
-  data.labels.forEach((label, i) => {
-    if (label === 0) {
-      safeX.push(data.x[i]);
-      safeY.push(data.y[i]);
-    } else {
-      toxicX.push(data.x[i]);
-      toxicY.push(data.y[i]);
-    }
-  });
+  if (data) {
+    data.labels.forEach((label, i) => {
+      if (label === 0) {
+        safeX.push(data.x[i]);
+        safeY.push(data.y[i]);
+      } else {
+        toxicX.push(data.x[i]);
+        toxicY.push(data.y[i]);
+      }
+    });
+  }
 
   return (
     <Box>
@@ -95,7 +119,29 @@ export const RepresentationView: React.FC = () => {
         Representation View
       </Typography>
 
-      {/* Controls */}
+      {/* Loading State */}
+      {isLoading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+          <CircularProgress />
+        </Box>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <Paper sx={{ p: 2, mb: 3, bgcolor: '#fff3e0' }}>
+          <Typography color="warning.main">{error}</Typography>
+        </Paper>
+      )}
+
+      {!isLoading && !data && (
+        <Box sx={{ textAlign: 'center', py: 8 }}>
+          <Typography variant="h6" color="text.secondary">
+            No representation data available.
+          </Typography>
+        </Box>
+      )}
+
+      {!isLoading && data && (
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} sm={4}>
@@ -230,6 +276,7 @@ export const RepresentationView: React.FC = () => {
           }}
         />
       </Paper>
+      )}
     </Box>
   );
 };
