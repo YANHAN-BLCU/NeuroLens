@@ -16,7 +16,11 @@ import {
   Chip,
   Card,
   CardContent,
+  CircularProgress,
 } from '@mui/material';
+import { useStore } from '../store';
+import { layerApi } from '../services/api';
+import { LayerEvolutionData } from '../types';
 
 interface LayerData {
   layer: number;
@@ -24,6 +28,9 @@ interface LayerData {
   toxic_count: number;
   safe_ratio: number;
   val_acc: number;
+  val_roc_auc?: number;
+  mean_projection_safe?: number;
+  mean_projection_toxic?: number;
 }
 
 const MOCK_LAYER_DATA: LayerData[] = [
@@ -38,7 +45,63 @@ const MOCK_LAYER_DATA: LayerData[] = [
 ];
 
 export const LayerView: React.FC = () => {
-  const [layerData, setLayerData] = useState<LayerData[]>(MOCK_LAYER_DATA);
+  const { layerEvolution, setLayerEvolution } = useStore();
+  const [layerData, setLayerData] = useState<LayerData[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Fetch layer evolution data from API
+  useEffect(() => {
+    const fetchLayerEvolution = async () => {
+      setIsLoading(true);
+      try {
+        const data = await layerApi.getLayerEvolution();
+        setLayerEvolution(data);
+        
+        // Transform API response to array format
+        const layers = Object.entries(data).map(([key, value]) => {
+          const layerNum = parseInt(key.replace('layer_', ''));
+          return {
+            layer: layerNum,
+            safe_count: value.safe_count,
+            toxic_count: value.toxic_count,
+            safe_ratio: value.safe_ratio,
+            val_acc: value.val_acc || 0,
+            val_roc_auc: value.val_roc_auc,
+            mean_projection_safe: value.mean_projection_safe,
+            mean_projection_toxic: value.mean_projection_toxic,
+          };
+        }).sort((a, b) => a.layer - b.layer);
+        
+        setLayerData(layers);
+      } catch (error) {
+        console.error('Failed to fetch layer evolution data:', error);
+        // Fallback to mock data on error
+        setLayerData(MOCK_LAYER_DATA);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    if (!layerEvolution) {
+      fetchLayerEvolution();
+    } else {
+      // Transform cached data
+      const layers = Object.entries(layerEvolution).map(([key, value]) => {
+        const layerNum = parseInt(key.replace('layer_', ''));
+        return {
+          layer: layerNum,
+          safe_count: value.safe_count,
+          toxic_count: value.toxic_count,
+          safe_ratio: value.safe_ratio,
+          val_acc: value.val_acc || 0,
+          val_roc_auc: value.val_roc_auc,
+          mean_projection_safe: value.mean_projection_safe,
+          mean_projection_toxic: value.mean_projection_toxic,
+        };
+      }).sort((a, b) => a.layer - b.layer);
+      setLayerData(layers);
+    }
+  }, [layerEvolution, setLayerEvolution]);
 
   // Sankey diagram option
   const getSankeyOption = () => {
@@ -182,7 +245,19 @@ export const LayerView: React.FC = () => {
         Layer View
       </Typography>
 
-      {/* Summary Cards */}
+      {isLoading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+          <CircularProgress />
+        </Box>
+      )}
+
+      {!isLoading && layerData.length === 0 && (
+        <Typography variant="body1" color="text.secondary" sx={{ py: 4 }}>
+          No layer evolution data available. Please run the pipeline first.
+        </Typography>
+      )}
+
+      {!isLoading && layerData.length > 0 && (
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={4}>
           <Card sx={{ bgcolor: '#e3f2fd' }}>
@@ -272,6 +347,7 @@ export const LayerView: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      )}
     </Box>
   );
 };
