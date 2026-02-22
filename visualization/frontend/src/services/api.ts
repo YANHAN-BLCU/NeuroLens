@@ -262,6 +262,98 @@ export const healthApi = {
   },
 };
 
+// ============= Probes API =============
+
+export const probesApi = {
+  /**
+   * Get probe metrics for all layers
+   */
+  getAllLayers: async (): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get('/probes/layers');
+    return response.data;
+  },
+
+  /**
+   * Get probe metrics for a specific layer
+   */
+  getLayer: async (layerIdx: number): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get(`/probes/layers/${layerIdx}`);
+    return response.data;
+  },
+};
+
+// ============= Neuron Scores API =============
+
+export const neuronScoresApi = {
+  /**
+   * Get safety neuron scores
+   */
+  getSafetyScores: async (limit?: number): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get('/neurons/scores/safety', { params: { limit } });
+    return response.data;
+  },
+
+  /**
+   * Get utility neuron scores
+   */
+  getUtilityScores: async (limit?: number): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get('/neurons/scores/utility', { params: { limit } });
+    return response.data;
+  },
+
+  /**
+   * Get combined safety and utility neuron scores
+   */
+  getCombinedScores: async (limit?: number): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get('/neurons/scores/combined', { params: { limit } });
+    return response.data;
+  },
+};
+
+// ============= Toxic Vectors API =============
+
+export const toxicVectorsApi = {
+  /**
+   * Get toxic vectors summary
+   */
+  getSummary: async (): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get('/toxic-vectors/summary');
+    return response.data;
+  },
+};
+
+// ============= Fine-tuning Evaluation API =============
+
+export const finetuningApi = {
+  /**
+   * Get fine-tuning evaluation comparison
+   */
+  getEvaluation: async (): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get('/finetuning/evaluation');
+    return response.data;
+  },
+
+  /**
+   * Get fine-tuning configuration
+   */
+  getConfig: async (): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get('/finetuning/config');
+    return response.data;
+  },
+};
+
+// ============= Data Summary API =============
+
+export const dataSummaryApi = {
+  /**
+   * Get summary of all available data
+   */
+  getSummary: async (): Promise<Record<string, unknown>> => {
+    const response = await apiClient.get('/data/summary');
+    return response.data;
+  },
+};
+
 // Export default client
 export default apiClient;
 

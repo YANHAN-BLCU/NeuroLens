@@ -140,3 +140,95 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
+// Probe Metrics
+export interface ProbeMetrics {
+  train_acc: number;
+  train_safe_acc: number;
+  train_toxic_acc: number;
+  train_balanced_acc: number;
+  test_acc: number;
+  test_safe_acc: number;
+  test_toxic_acc: number;
+  test_balanced_acc: number;
+  test_roc_auc: number;
+  test_pr_auc: number;
+  best_epoch: number;
+  total_epochs: number;
+}
+
+export type ProbeLayersData = Record<string, ProbeMetrics>;
+
+// Neuron Scores
+export interface NeuronScore {
+  key: string;
+  layer: number;
+  neuron: number;
+  score: number;
+  rank: number;
+  percentile: number;
+}
+
+export interface NeuronScoresData {
+  metadata: {
+    model?: string;
+    num_samples_used?: number;
+    neuron_type?: string;
+    num_total_neurons?: number;
+  };
+  neurons: NeuronScore[];
+}
+
+export interface OverlapNeuron {
+  key: string;
+  safety_score: number;
+  utility_score: number;
+  layer: number;
+  neuron: number;
+}
+
+export interface CombinedNeuronScores {
+  safety_neurons: NeuronScore[];
+  utility_neurons: NeuronScore[];
+  overlap_neurons: OverlapNeuron[];
+  metadata: {
+    num_safety: number;
+    num_utility: number;
+    num_overlap: number;
+  };
+}
+
+// Toxic Vectors
+export interface ToxicVectorsSummary {
+  available: boolean;
+  keys?: string[];
+  shapes?: Record<string, number[]>;
+  dtypes?: Record<string, string>;
+  message?: string;
+  error?: string;
+}
+
+// Fine-tuning Evaluation
+export interface FinetuningEvaluation {
+  baseline?: {
+    asr: number;
+    utility: number;
+  };
+  tsft?: {
+    asr: number;
+    utility: number;
+    training_loss?: number[];
+  };
+  va_tsft?: {
+    asr: number;
+    utility: number;
+    training_loss?: number[];
+  };
+}
+
+// Data Summary
+export interface DataSummary {
+  available_data: Record<string, boolean>;
+  total_files: number;
+  total_available: number;
+}
+
