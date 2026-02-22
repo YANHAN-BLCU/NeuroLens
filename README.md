@@ -161,6 +161,8 @@ python scripts/run_io_tests.py
 
 ### 6. 启动可视化系统
 
+#### 本地运行
+
 ```bash
 # 启动后端 (端口 8000)
 cd visualization/backend
@@ -173,6 +175,38 @@ npm run dev
 ```
 
 访问 http://localhost:5173 查看可视化界面。
+
+#### Docker 容器内运行
+
+```bash
+# 进入容器
+docker exec -it neurobreak-container /bin/bash
+
+# 在容器内启动后端服务
+cd /workspace/visualization/backend
+pip install -r requirements.txt
+python main.py &
+
+# 容器端口映射（启动容器时需要）
+# docker run -it --gpus all -p 8000:8000 -p 5173:5173 neurolens:latest
+```
+
+或使用 PowerShell 脚本（Windows）：
+
+```powershell
+# 启动容器并映射端口
+docker run -it --gpus all -p 8000:8000 -p 5173:5173 -v ${PWD}:/workspace neurolens:latest
+
+# 进入容器后
+docker exec -it neurobreak-container /bin/bash
+cd /workspace/visualization/backend
+python main.py
+```
+
+**注意**：
+- 后端服务默认运行在 `http://localhost:8000`
+- 前端需要单独运行或通过代理访问
+- 确保容器端口已正确映射
 
 ## 🐳 Docker 部署
 
