@@ -6,13 +6,12 @@
   - LLM-Research/Llama-3.2-3B-Instruct (默认)
   - LLM-Research/Meta-Llama-3-8B-Instruct
 - 安全分类器：
-  - LLM-Research/Llama-Guard-3-1B (默认)
-  - LLM-Research/Llama-Guard-3-8B
+  - Qwen/Qwen3Guard-Gen-8B (默认)
 
 使用方法：
-    python scripts/download_models.py --model LLM-Research/Llama-3.2-3B-Instruct --classifier LLM-Research/Llama-Guard-3-1B
+    python scripts/download_models.py --model LLM-Research/Llama-3.2-3B-Instruct --classifier Qwen/Qwen3Guard-Gen-8B
     python scripts/download_models.py --all  # 下载默认的两个模型
-    python scripts/download_models.py --model-8b --classifier-8b  # 下载 8B 模型
+    python scripts/download_models.py --model-8b --classifier-8b  # 8B 推理 + Qwen3Guard-Gen-8B（勿单独写 --classifier，须带模型 ID）
 """
 
 import argparse
@@ -40,11 +39,11 @@ except ImportError:
 
 # 默认模型配置（ModelScope 格式）
 DEFAULT_MODEL = "LLM-Research/Llama-3.2-3B-Instruct"
-DEFAULT_CLASSIFIER = "LLM-Research/Llama-Guard-3-1B"
+DEFAULT_CLASSIFIER = "Qwen/Qwen3Guard-Gen-8B"
 
 # 8B 模型配置
 MODEL_8B = "LLM-Research/Meta-Llama-3-8B-Instruct"
-CLASSIFIER_8B = "LLM-Research/Llama-Guard-3-8B"
+CLASSIFIER_8B = "Qwen/Qwen3Guard-Gen-8B"
 
 
 def get_cache_dir() -> Path:
@@ -215,8 +214,8 @@ def main():
   # 单独下载分类器
   python {sys.argv[0]} --classifier {DEFAULT_CLASSIFIER}
   
-  # 下载 8B 分类器
-  python {sys.argv[0]} --classifier-8b
+  # 8B 推理 + Qwen3Guard-Gen-8B（或 --classifier {DEFAULT_CLASSIFIER}）
+  python {sys.argv[0]} --model-8b --classifier-8b
   
   # 自定义模型和输出目录
   python {sys.argv[0]} --model {DEFAULT_MODEL} --classifier {DEFAULT_CLASSIFIER} --output /path/to/cache
@@ -237,7 +236,8 @@ def main():
     parser.add_argument(
         "--classifier",
         type=str,
-        help=f"安全分类器 ID (默认: {DEFAULT_CLASSIFIER})",
+        metavar="MODEL_ID",
+        help=f"安全分类器 ModelScope ID，须写完整 ID（默认: {DEFAULT_CLASSIFIER}）。仅要开关请用 --classifier-8b",
     )
     parser.add_argument(
         "--all",
@@ -252,7 +252,7 @@ def main():
     parser.add_argument(
         "--classifier-8b",
         action="store_true",
-        help=f"使用 8B 安全分类器: {CLASSIFIER_8B}",
+        help=f"使用 Qwen3Guard-Gen-8B 安全分类器（与 --classifier 等效）",
     )
     parser.add_argument(
         "--all-8b",

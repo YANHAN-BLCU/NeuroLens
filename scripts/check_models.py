@@ -12,9 +12,9 @@ GUARD_LOCAL_PATH = os.getenv("GUARD_LOCAL_PATH", "F:/models/Llama-Guard-3-8B")
 # 容器内路径：优先检查 /cache（当前挂载点），其次 /workspace/ms_models
 LLM_CONTAINER_PATH = os.getenv("LLM_CONTAINER_PATH", "/cache/Meta-Llama-3-8B-Instruct")
 GUARD_CONTAINER_PATH = os.getenv("GUARD_CONTAINER_PATH", "/cache/Llama-Guard-3-8B")
-# 备用路径
-LLM_WORKSPACE_PATH = "/workspace/ms_models/Meta-Llama-3-8B-Instruct"
-GUARD_WORKSPACE_PATH = "/workspace/ms_models/Llama-Guard-3-8B"
+# 备用路径（包含 LLM-Research 子目录）
+LLM_WORKSPACE_PATH = "/workspace/ms_models/LLM-Research/Meta-Llama-3-8B-Instruct"
+GUARD_WORKSPACE_PATH = "/workspace/ms_models/LLM-Research/Llama-Guard-3-8B"
 
 def check_model_path(path: str, name: str):
     """检查模型路径"""

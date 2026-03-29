@@ -3,10 +3,10 @@
 
 param(
     [string]$ImageName = "neurolens:v1.0",
-    [string]$ContainerName = "neurobreak-container",
+    [string]$ContainerName = "neurolens",
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 4173,
-    [string]$ModelPath = "F:/models",
+    [string]$ModelPath = "D:\NeuroLens-master\ms_models",
     [string]$ModelScopeToken = "",
     [switch]$Detached = $false
 )
@@ -117,16 +117,19 @@ if ($ModelPath -and (Test-Path $ModelPath)) {
     $dockerArgs += "${modelMount}:/workspace/models"
 }
 
-# 添加镜像名称和启动命令
+# 添加镜像名称
 $dockerArgs += $ImageName
 
+# 注意：镜像 Dockerfile 已经有 ENTRYPOINT ["/bin/bash"]
+# 对于交互式运行，不添加任何命令，让 ENTRYPOINT 直接执行 /bin/bash
+# 对于后台运行，需要覆盖 ENTRYPOINT 使用 sleep
 if ($Detached) {
     # 后台运行时使用sleep保持容器运行
-    $dockerArgs += "sleep", "infinity"
-} else {
-    # 交互式运行时直接进入bash
-    $dockerArgs += "/bin/bash"
+    # 需要覆盖 ENTRYPOINT
+    $dockerArgs += "--entrypoint", "sleep"
+    $dockerArgs += "infinity"
 }
+# 交互式运行时，不添加任何命令，ENTRYPOINT 会直接执行 /bin/bash
 
 # 显示完整命令
 Write-Host ""
