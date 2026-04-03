@@ -86,3 +86,5 @@ ms_models/**/original/*.pth
 Thumbs.db
 .DS_Store
 
+# PDF files (large documentation)
+*.pdf
