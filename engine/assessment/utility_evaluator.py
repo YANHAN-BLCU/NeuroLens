@@ -7,11 +7,12 @@
 - WikiText 困惑度计算
 
 参考论文：
-    @inproceedings{sun2024simple,
-        title={A Simple and Effective Pruning Approach for Large Language Models},
-        author={Sun, Mingjie and Liu, Zhuang and Bair, Anna and Kolter, J. Zico},
-        booktitle={ICLR},
-        year={2024}
+    @inproceedings{sun2024wanda,
+        title     = {A Simple and Effective Pruning Approach for Large Language Models},
+        author    = {Sun, Mingjie and Liu, Zhuang and Bair, Anna and Kolter, J. Zico},
+        booktitle = {Proceedings of the International Conference on Learning Representations (ICLR)},
+        year      = {2024},
+        url       = {https://arxiv.org/abs/2306.11695}
     }
 
 Usage:
@@ -32,31 +33,22 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
+
+# 项目根目录
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # 尝试导入 lm-eval，如果不可用则使用内置实现
 HAS_LM_EVAL = False
-_LM_EVAL_SHORT_PATH = r"D:\lm_eval_lib"
-_LM_EVAL_HF_PATH = "EleutherAI/lm-evaluation-harness"
 
 try:
     import lm_eval
     from lm_eval import evaluator
     from lm_eval.models.huggingface import HFLM
     HAS_LM_EVAL = True
-except ImportError:
-    # 尝试从备用短路径导入（Windows 长路径问题解决方案）
-    try:
-        import sys
-        if _LM_EVAL_SHORT_PATH not in sys.path:
-            sys.path.insert(0, _LM_EVAL_SHORT_PATH)
-        import lm_eval
-        from lm_eval import evaluator
-        from lm_eval.models.huggingface import HFLM
-        HAS_LM_EVAL = True
-    except ImportError:
-        HAS_LM_EVAL = False
-        print("[Utility Evaluator] 警告: lm-eval 未安装，将使用内置评估方法")
+except ImportError as e:
+    HAS_LM_EVAL = False
+    print(f"[Utility Evaluator] 警告: lm-eval 导入失败 ({e})，将使用内置评估方法")
 
 
 # 尝试从 HuggingFace 数据集加载任务数据
@@ -400,6 +392,43 @@ def compute_wikitext_perplexity(
 # 内部辅助函数
 # ============================================================================
 
+def _generation_config_new_tokens_only(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    max_new_tokens: int,
+) -> GenerationConfig:
+    “””克隆模型生成配置，仅用 max_new_tokens 限制长度并清空 max_length。
+
+    避免与模型默认 generation_config 中的 max_length 并存时反复触发
+    UserWarning（max_new_tokens 与 max_length 同时”生效”的提示）。
+    “””
+    from copy import deepcopy
+
+    pad_id = tokenizer.pad_token_id
+    eos_id = getattr(tokenizer, “eos_token_id”, None)
+    base = getattr(model, “generation_config”, None)
+    if base is not None:
+        cfg = base.clone() if callable(getattr(base, “clone”, None)) else deepcopy(base)
+    elif hasattr(GenerationConfig, “from_model_config”):
+        cfg = GenerationConfig.from_model_config(model.config)
+    else:
+        cfg = GenerationConfig()
+
+    cfg.max_new_tokens = int(max_new_tokens)
+    cfg.do_sample = False
+    cfg.temperature = None  # 禁用采样相关参数
+    cfg.top_p = None
+    cfg.top_k = None
+    if pad_id is not None:
+        cfg.pad_token_id = pad_id
+    if eos_id is not None:
+        cfg.eos_token_id = eos_id
+    # 确保只使用 max_new_tokens，不使用 max_length
+    if hasattr(cfg, “max_length”):
+        cfg.max_length = None
+    return cfg
+
+
 def _load_model(
     model_path: str,
     device: torch.device,
@@ -425,15 +454,31 @@ def _load_model(
 
 
 def _get_wikitext_path() -> Optional[Path]:
-    """获取 WikiText 数据集路径"""
-    # 可能的路径
-    possible_paths = [
+    """获取 WikiText 数据集路径
+
+    优先使用验证集（wiki.valid.raw），与 Wanda 论文保持一致。
+    回退到测试集（wiki.test.raw）。
+    """
+    # 可能的路径（优先 data/utility，验证集优先）
+    possible_valid = [
+        PROJECT_ROOT / "data" / "utility" / "wikitext" / "wikitext-2-raw" / "wiki.valid.raw",
+        PROJECT_ROOT / "data" / "wikitext" / "wikitext-2-raw" / "wiki.valid.raw",
+        Path("data/utility/wikitext/wikitext-2-raw/wiki.valid.raw"),
         Path("data/wikitext/wikitext-2-raw/wiki.valid.raw"),
-        Path("data/wikitext/wiki.valid.raw"),
-        Path("wikitext/wiki.valid.raw"),
     ]
 
-    for path in possible_paths:
+    possible_test = [
+        PROJECT_ROOT / "data" / "utility" / "wikitext" / "wikitext-2-raw" / "wiki.test.raw",
+        PROJECT_ROOT / "data" / "wikitext" / "wikitext-2-raw" / "wiki.test.raw",
+        Path("data/utility/wikitext/wiki.test.raw"),
+        Path("data/wikitext/wiki.test.raw"),
+    ]
+
+    for path in possible_valid:
+        if path.exists():
+            return path
+
+    for path in possible_test:
         if path.exists():
             return path
 
@@ -541,14 +586,10 @@ def _evaluate_single_task(
             # 构建输入
             inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
-            # 生成
+            # 生成（显式 GenerationConfig，避免 max_length 与 max_new_tokens 并存刷屏警告）
+            gen_cfg = _generation_config_new_tokens_only(model, tokenizer, 10)
             with torch.no_grad():
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=10,
-                    do_sample=False,
-                    pad_token_id=tokenizer.pad_token_id,
-                )
+                outputs = model.generate(**inputs, generation_config=gen_cfg)
 
             response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
             response = response.strip().lower()
@@ -567,10 +608,78 @@ def _evaluate_single_task(
     return accuracy
 
 
-def _load_task_data(task: str, max_samples: Optional[int] = None) -> List[Dict]:
-    """加载任务数据（内置实现）
+def _get_local_data_path(task: str) -> Optional[Path]:
+    """获取本地数据集路径（优先使用已下载的数据）
 
-    支持从 HuggingFace datasets 加载以下任务：
+    查找策略：优先找 test.jsonl，回退到 validation.jsonl，
+    与 Wanda 论文评估协议及 download_utility_datasets.py 实际下载结果一致。
+    """
+    base = PROJECT_ROOT / "data" / "utility"
+
+    # 主映射：每个任务对应的实际文件名
+    primary_mapping = {
+        "hellaswag": base / "hellaswag" / "test.jsonl",
+        "winogrande": base / "winogrande" / "test.jsonl",
+        "arc_easy": base / "arc" / "arc_easy_test.jsonl",
+        "arc_challenge": base / "arc" / "arc_challenge_test.jsonl",
+        "obqa": base / "openbookqa" / "test.jsonl",
+        "boolq": base / "super_glue" / "boolq" / "validation.jsonl",
+        "rte": base / "super_glue" / "rte" / "validation.jsonl",
+    }
+
+    # 备选映射（test 不存在时尝试 validation，反之亦然）
+    alt_mapping = {
+        "hellaswag": base / "hellaswag" / "validation.jsonl",
+        "winogrande": base / "winogrande" / "validation.jsonl",
+        "arc_easy": base / "arc" / "arc_easy_validation.jsonl",
+        "arc_challenge": base / "arc" / "arc_challenge_validation.jsonl",
+        "obqa": base / "openbookqa" / "validation.jsonl",
+    }
+
+    path = primary_mapping.get(task)
+    if path and path.exists():
+        return path
+
+    alt = alt_mapping.get(task)
+    if alt and alt.exists():
+        return alt
+
+    # ARC 额外兼容：可能下载为 _train.jsonl 或其他后缀
+    if task.startswith("arc_"):
+        arc_base = base / "arc"
+        for f in arc_base.glob("arc_easy_*.jsonl"):
+            if f.exists():
+                return f
+        for f in arc_base.glob("arc_challenge_*.jsonl"):
+            if f.exists():
+                return f
+
+    return None
+
+
+def _load_local_jsonl(path: Path) -> List[Dict]:
+    """从本地 JSONL 文件加载数据集"""
+    samples = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                samples.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return samples
+
+
+def _load_task_data(task: str, max_samples: Optional[int] = None) -> List[Dict]:
+    """加载任务数据（优先从本地加载已下载的数据）
+
+    支持从以下来源加载：
+    1. 本地已下载的数据（data/utility/）
+    2. HuggingFace datasets 自动下载
+
+    支持的任务：
     - hellaswag
     - winogrande
     - arc_easy / arc_challenge
@@ -585,6 +694,24 @@ def _load_task_data(task: str, max_samples: Optional[int] = None) -> List[Dict]:
     Returns:
         任务数据列表
     """
+    # 优先尝试从本地加载
+    local_path = _get_local_data_path(task)
+    if local_path and local_path.exists():
+        print(f"[Utility Evaluator] 从本地加载: {local_path}")
+        try:
+            local_data = _load_local_jsonl(local_path)
+            samples = []
+            for i, item in enumerate(local_data):
+                if max_samples and i >= max_samples:
+                    break
+                sample = _convert_to_prompt_format(task, item)
+                if sample:
+                    samples.append(sample)
+            if samples:
+                return samples
+        except Exception as e:
+            print(f"[Utility Evaluator] 本地加载失败: {e}，回退到 HuggingFace")
+
     if not HAS_DATASETS:
         # 如果 datasets 不可用，返回模拟数据进行测试
         print(f"[Utility Evaluator] 警告: datasets 库不可用，使用模拟数据")
@@ -1000,13 +1127,12 @@ def _evaluate_with_lm_eval_simple(
 
                         max_gen_tokens = getattr(request, "max_gen_tokens", 20)
 
+                        gen_cfg = _generation_config_new_tokens_only(
+                            self.model, self.tokenizer, max_gen_tokens
+                        )
                         with torch.no_grad():
                             outputs = self.model.generate(
-                                input_ids,
-                                max_new_tokens=max_gen_tokens,
-                                do_sample=False,
-                                pad_token_id=self.tokenizer.pad_token_id,
-                                eos_token_id=self.tokenizer.eos_token_id,
+                                input_ids, generation_config=gen_cfg
                             )
 
                         generated = self.tokenizer.decode(outputs[0][input_ids.shape[1]:], skip_special_tokens=True)
