@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -357,8 +358,8 @@ def tsft_finetune(
         learning_rate=learning_rate,
         warmup_steps=warmup_steps,
         logging_steps=logging_steps,
-        save_steps=save_steps,
-        save_total_limit=3,
+        save_steps=10**9,          # 禁止训练中间保存，统一在最后处理
+        save_total_limit=0,
         fp16=fp16,
         bf16=bf16,
         dataloader_pin_memory=True,
@@ -461,6 +462,37 @@ def _get_model_param_name(
     return None
 
 
+def _save_delta_only(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    original_state_dict: Dict[str, torch.Tensor],
+    output_dir: str,
+) -> None:
+    """只保存 Delta 权重到输出目录（不保存完整模型）"""
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    delta_path = Path(output_dir) / "delta_weights.pt"
+    current_state = {k: v.cpu() for k, v in model.state_dict().items()}
+    delta_state, num_modified = save_delta_weights(
+        original_state_dict, current_state, str(delta_path)
+    )
+    tokenizer.save_pretrained(output_dir)
+    meta = {
+        "save_mode": "delta",
+        "delta_path": str(delta_path),
+        "num_modified_layers": num_modified,
+        "delta_size_mb": round(
+            sum(t.numel() * t.element_size() / 1024 / 1024 for t in delta_state.values())
+            if num_modified > 0 else 0.0,
+            2,
+        ),
+        "base_model_type": model.config.model_type,
+        "requires_base_model": True,
+    }
+    with open(Path(output_dir) / "checkpoint_meta.json", "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, ensure_ascii=False)
+    print(f"[TSFT] Delta 保存到 {delta_path}，修改层数: {num_modified}")
+
+
 def save_delta_weights(
     original_state_dict: Dict[str, torch.Tensor],
     current_state_dict: Dict[str, torch.Tensor],
@@ -529,17 +561,22 @@ def load_delta_weights(
 
     print(f"[TSFT] 加载基础模型: {base_model_path}")
     model = AutoModelForCausalLM.from_pretrained(base_model_path)
+    # 清除 generation_config 中的 max_length，避免与后续 generate() 的 max_new_tokens 冲突
+    if hasattr(model, "generation_config") and model.generation_config is not None:
+        model.generation_config.max_length = None
     model.to(device)
     model.eval()
 
     original_state = model.state_dict()
-    delta_state = torch.load(delta_weights_path, map_location=device)
+    delta_state = torch.load(delta_weights_path, map_location=device, weights_only=True)
 
     print(f"[TSFT] 应用 {len(delta_state)} 个 delta 权重层")
 
-    for name, delta in delta_state.items():
+    for name in tqdm(delta_state.keys(), desc="应用 Delta 权重", unit="层"):
+        delta = delta_state[name]
         if name in original_state:
-            original_state[name] = original_state[name] + delta
+            target_device = original_state[name].device
+            original_state[name] = original_state[name] + delta.to(target_device)
         else:
             print(f"[TSFT] 警告: delta 中有未知参数 {name}")
 
@@ -574,7 +611,7 @@ def save_tsft_checkpoint(
 
     if save_only_delta:
         delta_path = Path(output_dir) / "delta_weights.pt"
-        current_state = model.state_dict()
+        current_state = {k: v.cpu() for k, v in model.state_dict().items()}
 
         delta_state, num_modified = save_delta_weights(
             original_state_dict, current_state, str(delta_path)
@@ -706,7 +743,7 @@ class _VATSFTTrainer(Trainer):
 
         return self.optimizer
 
-    def training_step(self, model, inputs):
+    def training_step(self, model, inputs, num_items_in_batch=None):
         """重写：在反向传播后对脆弱神经元应用梯度归一化"""
         model.train()
         with self.compute_loss_context_manager():
@@ -845,8 +882,8 @@ class VATSFTTrainer:
             learning_rate=learning_rate,
             warmup_steps=warmup_steps,
             logging_steps=logging_steps,
-            save_steps=save_steps,
-            save_total_limit=3,
+            save_steps=10**9,           # 禁止 Trainer 中间保存，训练完成后再统一处理
+            save_total_limit=0,          # 不保留任何中间检查点
             fp16=fp16,
             bf16=bf16,
             dataloader_pin_memory=True,
@@ -952,13 +989,9 @@ class VATSFTTrainer:
         )
         print(f"[VA+TSFT] 阶段一完成，最终损失: {train_result1.training_loss:.4f}")
 
-        # 保存阶段一检查点
-        save_tsft_checkpoint(
-            model=self.model,
-            tokenizer=self.tokenizer,
-            original_state_dict=original_state_dict,
-            output_dir=str(stage1_dir),
-            save_only_delta=False,
+        # 保存阶段一 Delta
+        _save_delta_only(
+            self.model, self.tokenizer, original_state_dict, str(stage1_dir)
         )
 
         # ═══════════════════════════════════════════
@@ -995,13 +1028,9 @@ class VATSFTTrainer:
             )
             print(f"[VA+TSFT] 阶段二完成，最终损失: {train_result2.training_loss:.4f}")
 
-            # 保存阶段二检查点
-            save_tsft_checkpoint(
-                model=self.model,
-                tokenizer=self.tokenizer,
-                original_state_dict=original_state_dict,
-                output_dir=str(stage2_dir),
-                save_only_delta=False,
+            # 保存阶段二 Delta
+            _save_delta_only(
+                self.model, self.tokenizer, original_state_dict, str(stage2_dir)
             )
         else:
             print("[VA+TSFT] 无脆弱神经元，跳过阶段二")

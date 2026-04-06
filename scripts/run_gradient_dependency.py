@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 r"""
 梯度依赖关系分析运行脚本
 
@@ -11,30 +12,28 @@ r"""
   - a^k_down,i: 第k层down_proj的第i个神经元的激活值
   - w^k_upstream,j: 上游（前一层，即k-1层）第j个神经元的权重参数（down_proj权重）
 
-使用方法（在 Docker 容器内的 bash 中）：
+Docker 容器内 bash 运行示例
     python /workspace/scripts/run_gradient_dependency.py \
         --model-path /cache/Meta-Llama-3-8B-Instruct \
         --dataset-path /workspace/logs/base_evaluation.jsonl \
         --output-path /workspace/outputs/gradient_dependency \
         --target-neurons-path /workspace/outputs/snip_scores/safety_neurons.json
 
-从宿主机运行（通过 docker exec）：
+容器内使用 docker exec 运行示例
     docker exec -it neurobreak-container python /workspace/scripts/run_gradient_dependency.py \
         --model-path /cache/Meta-Llama-3-8B-Instruct \
         --dataset-path /workspace/logs/base_evaluation.jsonl \
         --output-path /workspace/outputs/gradient_dependency \
         --target-neurons-path /workspace/outputs/snip_scores/safety_neurons.json
 
-Windows 环境使用（本地运行）：
+Windows 命令行运行示例
     python scripts/run_gradient_dependency.py ^
         --model-path D:\NeuroLens-master\ms_models\LLM-Research\Meta-Llama-3-8B-Instruct ^
         --dataset-path logs/base_evaluation.jsonl ^
         --output-path outputs/gradient_dependency ^
         --target-neurons-path outputs/snip_scores/safety_neurons.json
 
-内存优化选项（如果遇到 GPU 内存不足）：
-    # 注意：梯度计算需要完整精度权重，量化模型无法计算梯度！
-    # 如果内存不足，建议减小批次大小和样本数，而不是使用量化
+低显存 GPU 推荐配置
     python /workspace/scripts/run_gradient_dependency.py \
         --model-path /cache/Meta-Llama-3-8B-Instruct \
         --dataset-path /workspace/logs/base_evaluation.jsonl \
@@ -44,7 +43,7 @@ Windows 环境使用（本地运行）：
         --num-samples 100 \
         --max-length 512
 
-速度优化选项（在保证准确率的前提下加速）：
+标准配置示例
     python /workspace/scripts/run_gradient_dependency.py \
         --model-path /cache/Meta-Llama-3-8B-Instruct \
         --dataset-path /workspace/logs/base_evaluation.jsonl \
@@ -54,18 +53,13 @@ Windows 环境使用（本地运行）：
         --max-length 512 \
         --batch-size 4
 
-注意：
-- 必须指定 --target-neurons-path，因为梯度依赖分析需要明确的目标神经元
-- 目标神经元文件格式应为 JSON，包含神经元信息（支持 safety_neurons、utility_neurons 或 all_neurons 字段）
-- 数据集应为 JSONL 格式，每行包含文本字段：'text'、'prompt' 或 'input.prompt'
-- 脚本会自动检测项目根目录，支持 Docker 环境和本地环境
-- ⚠️  重要：梯度依赖分析需要完整精度的权重来计算梯度，量化模型无法计算梯度！
-- 如果遇到 GPU 内存不足，建议：
-  * 减小 --batch-size (如 --batch-size 2 或 1)
-  * 减小 --num-samples (如 --num-samples 100)
-  * 减小 --max-length (如 --max-length 512)
-- --clear-cache 参数可以在加载模型前清理 GPU 缓存
-- 梯度依赖分析计算量较大，建议使用较小的 batch_size 和 num_samples 进行测试
+注意事项
+- 目标神经元 JSON 文件应包含 safety_neurons、utility_neurons、all_neurons 或 dedicated_safety_neurons 字段
+- 数据集必须是 JSONL 格式，支持 text、prompt 或 input.prompt 字段
+- 低显存环境建议使用 Docker 容器
+- 如遇 OOM 问题：减小 batch_size 或 num_samples
+- 使用 --clear-cache 清理 GPU 缓存
+- 批处理大小和样本数可根据 GPU 显存调整
 """
 
 import sys
@@ -78,41 +72,65 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from typing import Dict, Tuple, Optional
 from torch.utils.data import Dataset
 
-# 添加工作目录到路径
-# 支持两种方式：1) 从脚本位置推断项目根目录 2) 使用 /workspace（Docker 环境）
+# 项目根目录设置
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if PROJECT_ROOT.exists() and (PROJECT_ROOT / 'engine').exists():
     sys.path.insert(0, str(PROJECT_ROOT))
 else:
-    # Docker 环境或使用绝对路径
     workspace_path = os.getenv('WORKSPACE_PATH', '/workspace')
     if os.path.exists(workspace_path):
         sys.path.insert(0, workspace_path)
     else:
-        # 尝试当前工作目录
         cwd = Path.cwd()
         if (cwd / 'engine').exists():
             sys.path.insert(0, str(cwd))
         else:
-            # 最后尝试 /workspace
             sys.path.insert(0, '/workspace')
 
 from engine.neurons.gradient_dependency import compute_gradient_dependency, visualize_gradient_dependency
 
 
+def _log_to_guard_label(
+    script_name: str,
+    status: str,
+    message: str,
+    details: dict = None,
+) -> None:
+    """写入 logs/guard_label.log 日志文件（JSONL 格式）"""
+    import datetime
+    import json as _json
+
+    log_dir = Path(__file__).resolve().parent.parent / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / 'guard_label.log'
+
+    entry = {
+        'timestamp': datetime.datetime.now().isoformat(),
+        'script': script_name,
+        'status': status,
+        'message': message,
+    }
+    if details:
+        entry['details'] = details
+
+    try:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(_json.dumps(entry, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+
+
 class TextDataset(Dataset):
-    """文本数据集，支持 JSONL 格式"""
-    
+    """文本数据集加载器，支持 JSONL 格式"""
+
     def __init__(self, file_path: str):
         self.samples = []
-        
+
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"数据集文件不存在: {file_path}")
-        
-        # 检查文件格式
+            raise FileNotFoundError(f'文件不存在: {file_path}')
+
         if file_path.endswith('.jsonl'):
-            # JSONL 格式：从每行 JSON 中提取文本
-            print(f'[Gradient Dependency] 检测到 JSONL 格式，加载样本...')
+            print('[Gradient Dependency] 加载 JSONL 数据集...')
             with open(file_path, 'r', encoding='utf-8') as f:
                 for line_num, line in enumerate(f, 1):
                     if not line.strip():
@@ -121,70 +139,68 @@ class TextDataset(Dataset):
                         sample = json.loads(line.strip())
                         self.samples.append(sample)
                     except json.JSONDecodeError as e:
-                        print(f'[Gradient Dependency] 警告: 第 {line_num} 行 JSON 解析失败: {e}')
+                        print(f'[Gradient Dependency] 警告: 第{line_num}行JSON解析错误: {e}')
                         continue
                     except Exception as e:
-                        print(f'[Gradient Dependency] 警告: 第 {line_num} 行处理失败: {e}')
+                        print(f'[Gradient Dependency] 警告: 第{line_num}行读取错误: {e}')
                         continue
         else:
-            raise ValueError(f"不支持的文件格式: {file_path}，仅支持 .jsonl 格式")
-        
-        print(f'[Gradient Dependency] 成功加载 {len(self.samples)} 个样本')
-    
+            raise ValueError(f'不支持的文件格式: {file_path}，仅支持 .jsonl 格式')
+
+        print(f'[Gradient Dependency] 加载完成，共 {len(self.samples)} 条样本')
+
     def __len__(self):
         return len(self.samples)
-    
+
     def __getitem__(self, idx):
         return self.samples[idx]
 
 
 def load_target_neurons(neurons_file: str) -> Optional[Dict[Tuple[int, int], Dict]]:
     """
-    从JSON文件中加载目标神经元
-    
-    支持多种JSON格式：
-    1. 嵌套格式：包含 'safety_neurons', 'utility_neurons', 'all_neurons', 'dedicated_safety_neurons' 键
-       - 例如：dedicated_safety_neurons.json
-       - 键格式：支持 "layer_X_neuron_Y" 或 "X_Y" (如 "31_4062")
-       - 值格式：支持 {layer, neuron, ...} 或 {layer_idx, neuron_idx, ...}
-    
-    2. 直接格式：根级别就是神经元字典
-       - 例如：activation_projection.json, quadrant_classification.json
-       - 键格式：必须为 "layer_X_neuron_Y" (如 "layer_31_neuron_4062")
-       - 值格式：支持 {layer_idx, neuron_idx, ...} 或 {layer, neuron, ...}
-    
+    从 JSON 文件加载目标神经元配置
+
+    支持的 JSON 格式：
+    1. 嵌套结构：包含 safety_neurons, utility_neurons, all_neurons, dedicated_safety_neurons 字段
+       - 典型文件 dedicated_safety_neurons.json
+       - 键名格式为 layer_X_neuron_Y 或 X_Y（如 31_4062）
+       - 值格式为 {layer, neuron, ...} 或 {layer_idx, neuron_idx, ...}
+
+    2. 扁平结构：键为 layer_X_neuron_Y 格式
+       - 典型文件 activation_projection.json, quadrant_classification.json
+       - 值格式为 {layer_idx, neuron_idx, ...} 或 {layer, neuron, ...}
+
     Args:
-        neurons_file: JSON文件路径
-    
+        neurons_file: JSON 文件路径
+
     Returns:
-        目标神经元字典，格式为 Dict[(layer_idx, neuron_idx), Dict]
-        如果文件不存在或格式不正确，返回 None
+        目标神经元字典 Dict[(layer_idx, neuron_idx), Dict]
+        加载失败时返回 None
     """
     if not os.path.exists(neurons_file):
-        print(f"[Gradient Dependency] 警告: 目标神经元文件不存在: {neurons_file}")
+        print(f'[Gradient Dependency] 错误: 目标神经元文件不存在: {neurons_file}')
         return None
-    
-    print(f"[Gradient Dependency] 加载目标神经元: {neurons_file}")
-    
+
+    print(f'[Gradient Dependency] 加载目标神经元: {neurons_file}')
+
     with open(neurons_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    
-    # 自动检测键名（支持多种神经元集合格式）
+
+    # 查找嵌套结构的神经元数据
     neurons_key = None
     for key in ['safety_neurons', 'utility_neurons', 'all_neurons', 'dedicated_safety_neurons']:
         if key in data:
             neurons_key = key
-            print(f"[Gradient Dependency] 检测到神经元集合键: {key}")
+            print(f'[Gradient Dependency] 检测到神经元类别: {key}')
             break
-    
+
     if neurons_key is None:
-        # 尝试直接解析为神经元字典格式（layer_X_neuron_Y）
-        # 支持 activation_projection.json 和 quadrant_classification.json 等格式
+        # 尝试解析扁平结构（layer_X_neuron_Y 格式）
         if any(k.startswith('layer_') and '_neuron_' in k for k in data.keys()):
-            print("[Gradient Dependency] 检测到直接神经元格式（layer_X_neuron_Y，如 activation_projection.json）")
+            print('[Gradient Dependency] 使用扁平结构解析 layer_X_neuron_Y 格式')
             target_neurons = {}
             for key, value in data.items():
-                # 支持 layer_idx/neuron_idx 或 layer/neuron 字段
+                # 优先使用 layer_idx/neuron_idx，其次使用 layer/neuron
                 if 'layer_idx' in value and 'neuron_idx' in value:
                     layer_idx = int(value['layer_idx'])
                     neuron_idx = int(value['neuron_idx'])
@@ -194,7 +210,6 @@ def load_target_neurons(neurons_file: str) -> Optional[Dict[Tuple[int, int], Dic
                     neuron_idx = int(value['neuron'])
                     target_neurons[(layer_idx, neuron_idx)] = value
                 elif key.startswith('layer_') and '_neuron_' in key:
-                    # 从键名解析：layer_X_neuron_Y
                     try:
                         parts = key.split('_')
                         if len(parts) >= 4 and parts[0] == 'layer' and parts[2] == 'neuron':
@@ -203,26 +218,25 @@ def load_target_neurons(neurons_file: str) -> Optional[Dict[Tuple[int, int], Dic
                             target_neurons[(layer_idx, neuron_idx)] = value
                     except (ValueError, IndexError):
                         continue
-            print(f"[Gradient Dependency] 从直接格式加载了 {len(target_neurons)} 个神经元")
+            print(f'[Gradient Dependency] 解析完成，共 {len(target_neurons)} 个目标神经元')
             return target_neurons
         else:
-            print(f"[Gradient Dependency] 错误: 无法识别神经元格式")
-            print(f"[Gradient Dependency] 支持的格式：")
-            print(f"  - 嵌套格式：包含 'dedicated_safety_neurons' 等键（如 dedicated_safety_neurons.json）")
-            print(f"  - 直接格式：根级别为神经元字典，键为 'layer_X_neuron_Y'（如 activation_projection.json）")
+            print('[Gradient Dependency] 错误: 无法识别的神经元数据格式')
+            print('[Gradient Dependency] 支持格式：')
+            print('  - 嵌套结构：包含 dedicated_safety_neurons 等字段')
+            print('  - 扁平结构：键为 layer_X_neuron_Y 格式')
             return None
-    
+
     neurons_data = data[neurons_key]
-    
-    # 解析神经元数据
+
+    # 解析神经元位置信息
     target_neurons = {}
     for key, value in neurons_data.items():
-        # 支持多种格式：
-        # 1. "layer_X_neuron_Y": {layer_idx, neuron_idx, ...} 或 {layer, neuron, ...}
-        # 2. "X_Y": {layer, neuron, ...} (下划线分隔格式)
-        # 3. 直接包含 layer_idx/neuron_idx 或 layer/neuron 的字典
-        
-        # 首先尝试从值中获取
+        # 支持的格式：
+        # 1. layer_X_neuron_Y: {layer_idx, neuron_idx, ...} 或 {layer, neuron, ...}
+        # 2. X_Y: {layer, neuron, ...} （简化格式）
+        # 3. 值的字段优先使用 layer_idx/neuron_idx
+
         if 'layer_idx' in value and 'neuron_idx' in value:
             layer_idx = int(value['layer_idx'])
             neuron_idx = int(value['neuron_idx'])
@@ -232,7 +246,6 @@ def load_target_neurons(neurons_file: str) -> Optional[Dict[Tuple[int, int], Dic
             neuron_idx = int(value['neuron'])
             target_neurons[(layer_idx, neuron_idx)] = value
         elif '_' in key:
-            # 尝试从键名解析
             try:
                 parts = key.split('_')
                 # 格式1: layer_X_neuron_Y
@@ -240,226 +253,247 @@ def load_target_neurons(neurons_file: str) -> Optional[Dict[Tuple[int, int], Dic
                     layer_idx = int(parts[1])
                     neuron_idx = int(parts[3])
                     target_neurons[(layer_idx, neuron_idx)] = value
-                # 格式2: X_Y (下划线分隔，如 "31_4062")
+                # 格式2: X_Y （简化格式）
                 elif len(parts) == 2:
                     layer_idx = int(parts[0])
                     neuron_idx = int(parts[1])
                     target_neurons[(layer_idx, neuron_idx)] = value
             except (ValueError, IndexError):
                 continue
-    
-    print(f"[Gradient Dependency] 成功加载 {len(target_neurons)} 个目标神经元")
+
+    print(f'[Gradient Dependency] 加载完成，共 {len(target_neurons)} 个目标神经元')
     return target_neurons
 
 
 def save_gradient_dependency(
     gradient_dependency: Dict[Tuple[int, int], Dict],
     output_path: Path,
-    filename: str = "gradient_dependency.json",
+    filename: str = 'gradient_dependency.json',
 ):
     """
-    保存梯度依赖关系结果到JSON文件
-    
+    保存梯度依赖关系结果到 JSON 文件
+
     Args:
-        gradient_dependency: 梯度依赖关系结果字典
+        gradient_dependency: 梯度依赖关系结果
         output_path: 输出目录路径
         filename: 输出文件名
     """
     output_path.mkdir(parents=True, exist_ok=True)
     output_file = output_path / filename
-    
-    # 转换元组键为字符串键（JSON不支持元组作为键）
+
     json_data = {}
     for (layer_idx, neuron_idx), data in gradient_dependency.items():
-        key = f"layer_{layer_idx}_neuron_{neuron_idx}"
+        key = f'layer_{layer_idx}_neuron_{neuron_idx}'
         json_data[key] = {
-            "layer_idx": layer_idx,
-            "neuron_idx": neuron_idx,
-            "upstream_neurons": [
-                {"layer_idx": l, "neuron_idx": n} 
+            'layer_idx': layer_idx,
+            'neuron_idx': neuron_idx,
+            'upstream_neurons': [
+                {'layer_idx': l, 'neuron_idx': n}
                 for l, n in data['upstream_neurons']
             ],
-            "gradient_strengths": data['gradient_strengths'],
-            "mean_gradient_strength": data.get('mean_gradient_strength', 0.0),
-            "max_gradient_strength": data.get('max_gradient_strength', 0.0),
-            "num_upstream_neurons": len(data['upstream_neurons']),
+            'gradient_strengths': data['gradient_strengths'],
+            'mean_gradient_strength': data.get('mean_gradient_strength', 0.0),
+            'max_gradient_strength': data.get('max_gradient_strength', 0.0),
+            'num_upstream_neurons': len(data['upstream_neurons']),
         }
-    
+
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(json_data, f, indent=2, ensure_ascii=False)
-    
-    print(f"[Gradient Dependency] 结果已保存到: {output_file}")
-    print(f"[Gradient Dependency] 共保存 {len(json_data)} 个目标神经元的梯度依赖信息")
+
+    print(f'[Gradient Dependency] 结果已保存: {output_file}')
+    print(f'[Gradient Dependency] 共 {len(json_data)} 个目标神经元及其梯度依赖信息')
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="计算神经元之间的梯度依赖关系（G_{i,j}）",
+        description='梯度依赖关系分析：计算神经元间的梯度依赖 G_{i,j}',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    
+
     parser.add_argument(
-        "--model-path",
+        '--model-path',
         type=str,
         required=True,
-        help="模型路径（本地路径或 HuggingFace 模型ID）"
+        help='模型路径，HuggingFace 模型 ID 或本地路径'
     )
-    
+
     parser.add_argument(
-        "--dataset-path",
+        '--dataset-path',
         type=str,
         required=True,
-        help="数据集路径（JSONL格式）"
+        help='数据集路径，JSONL 格式'
     )
-    
+
     parser.add_argument(
-        "--output-path",
+        '--output-path',
         type=str,
         required=True,
-        help="输出目录路径"
+        help='输出目录路径'
     )
-    
+
     parser.add_argument(
-        "--target-neurons-path",
+        '--target-neurons-path',
         type=str,
         required=True,
-        help="目标神经元文件路径（JSON格式）"
+        help='目标神经元配置文件路径，JSON 格式'
     )
-    
+
     parser.add_argument(
-        "--top-k",
+        '--top-k',
         type=float,
         default=0.1,
-        help="保留前k%%的强关联（默认0.1，即10%%）"
+        help='保留前 k%% 的强关联（默认 0.1，即 10%%）'
     )
-    
+
     parser.add_argument(
-        "--batch-size",
+        '--batch-size',
         type=int,
         default=4,
-        help="批大小（默认4，梯度计算需要更多内存）"
+        help='批处理大小（默认 4，根据显存调整）'
     )
-    
+
     parser.add_argument(
-        "--max-length",
+        '--max-length',
         type=int,
         default=1024,
-        help="最大序列长度（默认1024）"
+        help='最大序列长度（默认 1024）'
     )
-    
+
     parser.add_argument(
-        "--num-samples",
+        '--num-samples',
         type=int,
         default=None,
-        help="使用的样本数（None表示全部，默认None）"
+        help='使用的样本数量（None 表示全部）'
     )
-    
+
     parser.add_argument(
-        "--use-last-token",
-        action="store_true",
+        '--use-last-token',
+        action='store_true',
         default=True,
-        help="使用最后一个token的激活值（默认启用）"
+        help='使用最后一个 token 的激活值（默认开启）'
     )
-    
+
     parser.add_argument(
-        "--no-use-last-token",
-        dest="use_last_token",
-        action="store_false",
-        help="使用所有token的平均激活值（禁用最后一个token）"
+        '--no-use-last-token',
+        dest='use_last_token',
+        action='store_false',
+        help='使用所有 token 的平均激活值'
     )
-    
+
     parser.add_argument(
-        "--clear-cache",
-        action="store_true",
-        help="在加载模型前清理GPU缓存"
+        '--clear-cache',
+        action='store_true',
+        help='计算前清理 GPU 缓存'
     )
-    
+
     parser.add_argument(
-        "--device",
+        '--device',
         type=str,
         default=None,
-        help="计算设备（'cuda' 或 'cpu'，默认自动检测）"
+        help="计算设备：cuda 或 cpu，默认为自动检测"
     )
-    
+
     args = parser.parse_args()
-    
-    # 确定设备
+
+    _log_to_guard_label(
+        'run_gradient_dependency',
+        'START',
+        '梯度依赖分析开始',
+        details={
+            'model_path': args.model_path,
+            'dataset_path': args.dataset_path,
+            'target_neurons_path': args.target_neurons_path,
+            'batch_size': args.batch_size,
+            'num_samples': args.num_samples,
+        },
+    )
+
+    # 设备选择
     if args.device:
         device = torch.device(args.device)
     elif torch.cuda.is_available():
         device = torch.device('cuda:0')
     else:
         device = torch.device('cpu')
-    
-    print(f"[Gradient Dependency] 使用设备: {device}")
-    
-    # 清理GPU缓存（如果需要）
+
+    print(f'[Gradient Dependency] 计算设备: {device}')
+
+    # 清理 GPU 缓存
     if args.clear_cache and torch.cuda.is_available():
         torch.cuda.empty_cache()
-        print("[Gradient Dependency] 已清理GPU缓存")
-    
+        print('[Gradient Dependency] 已清理 GPU 缓存')
+
     # 加载模型
-    print(f"[Gradient Dependency] 加载模型: {args.model_path}")
-    print("[Gradient Dependency] ⚠️  注意: 梯度依赖分析需要完整精度的权重来计算梯度")
-    print("[Gradient Dependency] ⚠️  量化模型无法计算梯度，请使用完整精度模型")
+    print(f'[Gradient Dependency] 加载模型: {args.model_path}')
+    print('[Gradient Dependency] 提示：模型将自动分配到可用 GPU')
+    print('[Gradient Dependency] 提示：如遇显存不足，请减小 batch_size 或 num_samples')
     print()
-    
+
     try:
         model = AutoModelForCausalLM.from_pretrained(
             args.model_path,
             torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-            device_map="auto" if torch.cuda.is_available() else None,
+            device_map='auto' if torch.cuda.is_available() else None,
         )
     except Exception as e:
-        print(f"[Gradient Dependency] 模型加载失败: {e}")
+        print(f'[Gradient Dependency] 模型加载失败: {e}')
+        _log_to_guard_label(
+            'run_gradient_dependency',
+            'ERROR',
+            f'模型加载失败: {e}',
+            details={'exception': str(e)},
+        )
         return
-    
-    # 检查模型是否使用了量化
+
+    # 检测量化模型
     has_quantized = False
     if hasattr(model, 'quantization_config') or hasattr(model, 'hf_quantizer'):
         has_quantized = True
-        print("[Gradient Dependency] ⚠️  警告: 检测到量化配置，梯度计算可能失败！")
-        print("[Gradient Dependency] ⚠️  建议: 使用完整精度模型进行梯度依赖分析")
+        print('[Gradient Dependency] 检测：量化模型已加载')
+        print('[Gradient Dependency] 提示：量化模型可能影响梯度计算精度')
         print()
-    
+
     # 加载分词器
-    print(f"[Gradient Dependency] 加载分词器...")
+    print('[Gradient Dependency] 加载分词器...')
     try:
         tokenizer = AutoTokenizer.from_pretrained(args.model_path)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = 'left'
     except Exception as e:
-        print(f"[Gradient Dependency] 分词器加载失败: {e}")
+        print(f'[Gradient Dependency] 分词器加载失败: {e}')
         return
-    
+
     # 加载数据集
-    print(f"[Gradient Dependency] 加载数据集: {args.dataset_path}")
+    print(f'[Gradient Dependency] 加载数据集: {args.dataset_path}')
     try:
         dataset = TextDataset(args.dataset_path)
     except Exception as e:
-        print(f"[Gradient Dependency] 数据集加载失败: {e}")
+        print(f'[Gradient Dependency] 数据集加载失败: {e}')
         return
-    
+
     # 加载目标神经元
     target_neurons = load_target_neurons(args.target_neurons_path)
     if target_neurons is None or len(target_neurons) == 0:
-        print("[Gradient Dependency] 错误: 未找到有效的目标神经元")
+        print('[Gradient Dependency] 错误: 目标神经元为空或加载失败')
         return
-    
-    # 计算梯度依赖关系
-    print(f"[Gradient Dependency] 开始计算梯度依赖关系...")
-    print(f"[Gradient Dependency] 参数: top_k={args.top_k}, batch_size={args.batch_size}, "
-          f"max_length={args.max_length}, num_samples={args.num_samples}, "
-          f"use_last_token={args.use_last_token}")
+
+    # 显示分析配置
+    print('[Gradient Dependency] 分析配置:')
+    print(f'[Gradient Dependency]   - top_k: {args.top_k}')
+    print(f'[Gradient Dependency]   - batch_size: {args.batch_size}')
+    print(f'[Gradient Dependency]   - max_length: {args.max_length}')
+    print(f'[Gradient Dependency]   - num_samples: {args.num_samples}')
+    print(f'[Gradient Dependency]   - use_last_token: {args.use_last_token}')
     print()
-    
-    # 预检查：如果使用了量化，给出最终警告
+
+    # 量化模型提示
     if has_quantized:
-        print("[Gradient Dependency] ⚠️  最终警告: 检测到量化配置，梯度依赖分析可能失败！")
-        print("[Gradient Dependency] ⚠️  如果第一个批次后未收集到任何梯度依赖，请使用完整精度模型")
+        print('[Gradient Dependency] 注意：量化模型可能需要更大的 top_k 值以获得足够的梯度信号')
         print()
-    
+
+    # 执行梯度依赖分析
     try:
         gradient_dependency = compute_gradient_dependency(
             model=model,
@@ -474,43 +508,62 @@ def main():
             use_last_token=args.use_last_token,
         )
     except KeyboardInterrupt:
-        print("\n[Gradient Dependency] 用户中断")
+        print('\n[Gradient Dependency] 用户中断')
         return
     except Exception as e:
-        print(f"\n[Gradient Dependency] ❌ 计算失败: {e}")
-        print("[Gradient Dependency] 如果遇到梯度相关错误，请检查:")
-        print("  1. 模型权重是否正确加载（不应使用量化）")
-        print("  2. 目标神经元索引是否在有效范围内")
-        print("  3. 数据集格式是否正确")
+        print(f'\n[Gradient Dependency] 梯度依赖计算出错: {e}')
+        print('[Gradient Dependency] 常见问题排查：')
+        print('  1. 检查模型是否支持梯度计算')
+        print('  2. 尝试减小 batch_size 或 num_samples')
+        print('  3. 检查 GPU 显存是否充足')
         import traceback
         traceback.print_exc()
         return
-    
+
     # 检查结果
     if gradient_dependency is None or len(gradient_dependency) == 0:
-        print("\n[Gradient Dependency] ⚠️  警告: 未收集到任何梯度依赖结果")
-        print("[Gradient Dependency] 可能的原因:")
-        print("  1. 使用了量化模型（量化权重无法计算梯度）")
-        print("  2. 所有权重都未启用梯度")
-        print("  3. 未捕获到任何激活值")
+        print('\n[Gradient Dependency] 错误：梯度依赖结果为空')
+        print('[Gradient Dependency] 可能原因：')
+        print('  1. 目标神经元配置不正确')
+        print('  2. 数据集为空或格式错误')
+        print('  3. 模型前向传播失败')
         return
-    
+
     # 保存结果
     output_path = Path(args.output_path)
     save_gradient_dependency(gradient_dependency, output_path)
-    
+
     # 生成可视化数据
-    visualization_path = output_path / "gradient_dependency_visualization.json"
+    visualization_path = output_path / 'gradient_dependency_visualization.json'
     visualize_gradient_dependency(gradient_dependency, str(visualization_path))
-    
+
     # 统计结果
     total_upstream = sum(len(data.get('upstream_neurons', [])) for data in gradient_dependency.values())
     neurons_with_deps = sum(1 for data in gradient_dependency.values() if len(data.get('upstream_neurons', [])) > 0)
-    print(f"[Gradient Dependency] ✓ 成功计算 {len(gradient_dependency)} 个目标神经元的梯度依赖关系")
-    print(f"[Gradient Dependency] ✓ 共发现 {total_upstream} 个上游神经元关联")
-    print(f"[Gradient Dependency] ✓ {neurons_with_deps} 个神经元有上游依赖关系")
-    print("[Gradient Dependency] 完成！")
+    print(f'[Gradient Dependency] 成功计算 {len(gradient_dependency)} 个目标神经元的梯度依赖关系')
+    print(f'[Gradient Dependency] 共发现 {total_upstream} 个上游神经元关联')
+    print(f'[Gradient Dependency] {neurons_with_deps} 个神经元有上游依赖关系')
+    print('[Gradient Dependency] 完成！')
+
+    _log_to_guard_label(
+        'run_gradient_dependency',
+        'DONE',
+        f'梯度依赖分析完成 -- 神经元数={len(gradient_dependency)}, 上游关联={total_upstream}',
+        details={
+            'num_neurons': len(gradient_dependency),
+            'num_upstream_associations': total_upstream,
+        },
+    )
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception as e:
+        _log_to_guard_label(
+            'run_gradient_dependency',
+            'ERROR',
+            f'运行错误: {e}',
+            details={'exception': str(e)},
+        )
+        raise

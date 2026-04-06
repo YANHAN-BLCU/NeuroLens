@@ -40,11 +40,47 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+# 以 `python scripts/xxx.py` 运行时 sys.path[0] 为 scripts/，需把项目根加入路径才能 import engine
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from engine.neurons.utility_identifier import identify_utility_neurons
+
+
+def _log_to_guard_label(
+    script_name: str,
+    status: str,
+    message: str,
+    details: dict = None,
+) -> None:
+    """向 logs/guard_label.log 追加一条结构化运行记录（JSONL 格式）。"""
+    import datetime
+
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "guard_label.log"
+
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "script": script_name,
+        "status": status,
+        "message": message,
+    }
+    if details:
+        entry["details"] = details
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def parse_args() -> argparse.Namespace:
@@ -100,7 +136,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    
+
+    _log_to_guard_label(
+        "run_utility_identifier",
+        "START",
+        f"效用神经元识别启动 — p={args.utility_threshold_p}",
+        details={
+            "model": args.model_name_or_path,
+            "dataset_path": args.alpaca_path,
+            "utility_threshold_p": args.utility_threshold_p,
+            "num_samples": args.num_samples,
+        },
+    )
+
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
     
@@ -112,6 +160,7 @@ def main() -> None:
     
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = 'left'
     
     # 加载数据集以获取大小信息
     from engine.neurons.utility_identifier import AlpacaJsonlDataset
@@ -267,7 +316,26 @@ def main() -> None:
         if apply_threshold and len(utility_neurons) > 0:
             print(f"\n筛选后的效用神经元数量: {len(utility_neurons)} (前 {args.utility_threshold_p*100:.2f}%)")
 
+    _log_to_guard_label(
+        "run_utility_identifier",
+        "DONE",
+        f"效用神经元识别完成 — 神经元总数={len(all_neurons)}, 效用神经元={len(utility_neurons)}",
+        details={
+            "num_total_neurons": len(all_neurons),
+            "num_utility_neurons": len(utility_neurons),
+        },
+    )
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        _log_to_guard_label(
+            "run_utility_identifier",
+            "ERROR",
+            f"运行异常: {e}",
+            details={"exception": str(e)},
+        )
+        raise
 

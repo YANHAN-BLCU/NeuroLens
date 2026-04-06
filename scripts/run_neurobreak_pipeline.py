@@ -951,7 +951,7 @@ def run_phase6_activation_projection(
         model=model,
         tokenizer=tokenizer,
         dataset=dataset,
-        toxic_vectors_path=str(toxic_vec_path),
+        toxic_vectors=str(toxic_vec_path),
         target_neurons=target_neurons,
         device=device,
         batch_size=batch_size,
@@ -1024,7 +1024,7 @@ def run_phase65_parameter_alignment(
     from engine.neurons.parameter_alignment import compute_parameter_alignment
     param_align = compute_parameter_alignment(
         model=model,
-        toxic_vectors_path=str(toxic_vec_path),
+        toxic_vectors=str(toxic_vec_path),
         target_neurons=target_neurons,
     )
 
@@ -1192,6 +1192,7 @@ def run_phase9_finetune(
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = 'left'
 
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
@@ -1351,6 +1352,7 @@ def run_phase10_evaluate(
             tokenizer = AutoTokenizer.from_pretrained(str(model_dir), trust_remote_code=True)
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.padding_side = 'left'
             model = AutoModelForCausalLM.from_pretrained(str(model_dir))
             model.to(device)
             model.eval()

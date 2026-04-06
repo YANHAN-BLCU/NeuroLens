@@ -78,6 +78,12 @@ def main() -> int:
         default=[],
         help="Regex (repeatable) to exclude samples whose normalized output matches at start (case-insensitive)",
     )
+    ap.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output path to save refusal templates JSON",
+    )
     args = ap.parse_args()
 
     log_path = Path(args.log)
@@ -159,6 +165,25 @@ def main() -> int:
     print("\nCUE counts:")
     for k, v in cues.most_common():
         print(v, k)
+
+    # Save templates to JSON if output path is provided
+    if args.output:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Extract top templates from prefixes
+        top_templates = [prefix for prefix, _ in prefixes.most_common(args.top_k)]
+
+        templates_data = {
+            "refusal_templates": top_templates,
+            "count": allow_with_output,
+            "template_counts": {prefix: count for prefix, count in prefixes.most_common(args.top_k)}
+        }
+
+        with output_path.open("w", encoding="utf-8") as f:
+            json.dump(templates_data, f, ensure_ascii=False, indent=2)
+
+        print(f"\n✓ Saved {len(top_templates)} refusal templates to: {output_path}")
 
     return 0
 

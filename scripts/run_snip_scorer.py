@@ -44,6 +44,7 @@ import argparse
 import numpy as np
 import torch
 from pathlib import Path
+from typing import Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from torch.utils.data import Dataset
 
@@ -52,6 +53,43 @@ sys.path.insert(0, '/workspace')
 
 from engine.neurons.safety_identifier import identify_safety_neurons
 from engine.neurons.utility_identifier import identify_utility_neurons
+
+
+def _log_to_guard_label(
+    script_name: str,
+    status: str,
+    message: str,
+    details: Optional[dict] = None,
+) -> None:
+    """
+    向 logs/guard_label.log 追加一条结构化运行记录（JSONL 格式）。
+
+    Args:
+        script_name: 脚本名称，如 "run_snip_scorer"
+        status: "START" | "DONE" | "ERROR"
+        message: 简短描述
+        details: 任意补充字段（如样本数、神经元数等）
+    """
+    import datetime
+
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "guard_label.log"
+
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "script": script_name,
+        "status": status,
+        "message": message,
+    }
+    if details:
+        entry["details"] = details
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # 日志写入失败不影响主流程
 
 
 class TextDataset(Dataset):
@@ -259,7 +297,21 @@ def main():
     )
     
     args = parser.parse_args()
-    
+
+    # 记录启动日志
+    _log_to_guard_label(
+        "run_snip_scorer",
+        "START",
+        f"SNIP Scorer 启动 — mode={args.mode}, dataset={args.dataset_path}",
+        details={
+            "model_path": args.model_path,
+            "dataset_path": args.dataset_path,
+            "toxic_vectors_path": args.toxic_vectors_path,
+            "mode": args.mode,
+            "filter_benign": args.filter_benign,
+        },
+    )
+
     # 打印配置信息
     print("========================================")
     print("SNIP Scorer - 神经元分数计算")
@@ -305,6 +357,9 @@ def main():
 
     print('[SNIP] 加载模型和分词器（SNIP 阶段使用浮点模型，不走 4bit 量化）...')
     tokenizer = AutoTokenizer.from_pretrained(model_path)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = 'left'
 
     if torch.cuda.is_available():
         # GPU 上使用 FP16，既能节省显存，又保持参数是可微的浮点类型
@@ -423,15 +478,28 @@ def main():
     print(f"结果保存在: {output_path}")
     print("========================================")
 
+    _log_to_guard_label(
+        "run_snip_scorer",
+        "DONE",
+        f"SNIP Scorer 完成 — mode={mode}, 神经元数={len(neurons)}, 输出={output_path}",
+        details={
+            "mode": mode,
+            "num_neurons": len(neurons),
+            "output_path": str(output_path),
+        },
+    )
+
 
 if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
         print('\n[SNIP] 用户中断执行')
+        _log_to_guard_label("run_snip_scorer", "ERROR", "用户中断执行")
         sys.exit(1)
     except Exception as e:
         print(f'\n[SNIP] 错误: {e}')
         import traceback
         traceback.print_exc()
+        _log_to_guard_label("run_snip_scorer", "ERROR", f"运行异常: {e}", details={"exception": str(e)})
         sys.exit(1)

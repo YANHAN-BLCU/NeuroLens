@@ -111,6 +111,36 @@ else:
 from engine.neurons.activation_projection import compute_activation_projection
 
 
+def _log_to_guard_label(
+    script_name: str,
+    status: str,
+    message: str,
+    details: dict = None,
+) -> None:
+    """向 logs/guard_label.log 追加一条结构化运行记录（JSONL 格式）。"""
+    import datetime
+    import json as _json
+
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "guard_label.log"
+
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "script": script_name,
+        "status": status,
+        "message": message,
+    }
+    if details:
+        entry["details"] = details
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 class JailbreakDataset(Dataset):
     """Jailbreak数据集，支持 JSONL 格式，包含文本和jailbreak成功标志"""
     
@@ -374,7 +404,21 @@ def main():
     )
     
     args = parser.parse_args()
-    
+
+    _log_to_guard_label(
+        "run_activation_projection",
+        "START",
+        f"激活动态分析启动",
+        details={
+            "model_path": args.model_path,
+            "toxic_vectors_path": args.toxic_vectors_path,
+            "dataset_path": args.dataset_path,
+            "target_neurons_path": args.target_neurons_path,
+            "batch_size": args.batch_size,
+            "num_samples": args.num_samples,
+        },
+    )
+
     # 打印配置信息
     print("========================================")
     print("激活投影分析 - Activation Projection")
@@ -463,6 +507,9 @@ def main():
     # 加载模型
     print("[Activation Projection] 加载模型和分词器...")
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = 'left'
     
     # 准备模型加载参数
     model_kwargs = {
@@ -592,7 +639,7 @@ def main():
         model=model,
         tokenizer=tokenizer,
         dataset=dataset,
-        toxic_vectors_path=args.toxic_vectors_path,
+        toxic_vectors=args.toxic_vectors_path,
         target_neurons=target_neurons,
         device=device,
         batch_size=args.batch_size,
@@ -671,6 +718,25 @@ def main():
     print(f"结果已保存到: {output_file}")
     print("=" * 50)
 
+    _log_to_guard_label(
+        "run_activation_projection",
+        "DONE",
+        f"激活动态分析完成 — 神经元数={len(activation_projection)}, 输出={output_file}",
+        details={
+            "num_neurons": len(activation_projection),
+            "output_path": str(output_file),
+        },
+    )
+
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        _log_to_guard_label(
+            "run_activation_projection",
+            "ERROR",
+            f"运行异常: {e}",
+            details={"exception": str(e)},
+        )
+        raise

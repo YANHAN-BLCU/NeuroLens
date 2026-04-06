@@ -290,6 +290,7 @@ class ModelManager:
             self._llm_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
             if self._llm_tokenizer.pad_token is None:
                 self._llm_tokenizer.pad_token = self._llm_tokenizer.eos_token
+            self._llm_tokenizer.padding_side = 'left'
 
             # 确定设备：优先使用 GPU
             if torch.cuda.is_available():
@@ -340,6 +341,7 @@ class ModelManager:
                     )
                     self._llm_model = self._llm_model.to(device)
                     self._llm_model.eval()
+
             else:
                 device = torch.device("cpu")
                 print("[ModelManager] 警告: CUDA 不可用，使用 CPU")
@@ -351,7 +353,11 @@ class ModelManager:
                 )
                 self._llm_model = self._llm_model.to(device)
                 self._llm_model.eval()
-            
+
+            # 清除 generation_config 中的 max_length，避免与 generate() 的 max_new_tokens 冲突
+            if hasattr(self._llm_model, "generation_config") and self._llm_model.generation_config is not None:
+                self._llm_model.generation_config.max_length = None
+
             # 验证设备（4bit量化模型的参数可能分散在多个设备上）
             try:
                 actual_device = next(self._llm_model.parameters()).device
@@ -394,6 +400,7 @@ class ModelManager:
             self._guard_tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
             if self._guard_tokenizer.pad_token is None:
                 self._guard_tokenizer.pad_token = self._guard_tokenizer.eos_token
+            self._guard_tokenizer.padding_side = 'left'
 
             # 确定设备：使用 GPU 加载（4bit 量化后显存足够）
             if torch.cuda.is_available():
@@ -457,7 +464,11 @@ class ModelManager:
                 )
                 self._guard_model = self._guard_model.to(device)
                 self._guard_model.eval()
-            
+
+            # 清除 generation_config 中的 max_length，避免与 generate() 的 max_new_tokens 冲突
+            if hasattr(self._guard_model, "generation_config") and self._guard_model.generation_config is not None:
+                self._guard_model.generation_config.max_length = None
+
             # 验证设备（4bit量化模型的参数可能分散在多个设备上）
             try:
                 actual_device = next(self._guard_model.parameters()).device

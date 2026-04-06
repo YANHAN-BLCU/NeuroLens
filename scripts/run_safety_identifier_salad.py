@@ -42,7 +42,14 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+# 以 `python scripts/xxx.py` 运行时 sys.path[0] 为 scripts/，需把项目根加入路径才能 import engine
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
@@ -53,6 +60,35 @@ from engine.neurons.salad_safety_dataset import (
 )
 
 
+def _log_to_guard_label(
+    script_name: str,
+    status: str,
+    message: str,
+    details: dict = None,
+) -> None:
+    """向 logs/guard_label.log 追加一条结构化运行记录（JSONL 格式）。"""
+    import datetime
+
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "guard_label.log"
+
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "script": script_name,
+        "status": status,
+        "message": message,
+    }
+    if details:
+        entry["details"] = details
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass  # 日志写入失败不影响主流程
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="使用 SALAD 数据集中的安全样本识别安全神经元"
@@ -61,6 +97,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model_name_or_path",
         "--model-path",
+        "--model_path",
         type=str,
         required=True,
         dest="model_name_or_path",
@@ -79,8 +116,16 @@ def parse_args() -> argparse.Namespace:
         "--source_type",
         type=str,
         default="auto",
-        choices=["auto", "defense", "mcq", "evaluation"],
-        help="数据源类型（auto 表示自动检测）",
+        choices=["auto", "defense", "mcq", "evaluation", "text"],
+        help="数据源类型（auto 表示自动检测，text 表示直接提取 question 字段）",
+    )
+
+    parser.add_argument(
+        "--label_paths",
+        type=str,
+        nargs="+",
+        default=None,
+        help="标签文件路径列表（用于过滤 Safe 样本），与 dataset_path 一一对应",
     )
     
     parser.add_argument(
@@ -123,7 +168,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    
+
+    _log_to_guard_label(
+        "run_safety_identifier_salad",
+        "START",
+        f"安全神经元识别启动 — q={args.safety_threshold_q}",
+        details={
+            "model": args.model_name_or_path,
+            "dataset_path": args.dataset_path,
+            "safety_threshold_q": args.safety_threshold_q,
+            "num_samples": args.num_samples,
+        },
+    )
+
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
     
@@ -138,6 +195,7 @@ def main() -> None:
     
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = 'left'
     
     # 加载数据集
     print(f"加载 SALAD 安全数据集...")
@@ -154,7 +212,8 @@ def main() -> None:
         dataset = CombinedSaladSafetyDataset(
             file_paths=args.dataset_path,
             source_types=source_types,
-            max_samples_per_file=args.num_samples,
+            label_paths=args.label_paths,
+            max_total_samples=args.num_samples,
         )
     
     print(f"数据集大小: {len(dataset)}")
@@ -311,6 +370,25 @@ def main() -> None:
         if apply_threshold and len(safety_neurons) > 0:
             print(f"\n筛选后的安全神经元数量: {len(safety_neurons)} (前 {args.safety_threshold_q*100:.2f}%)")
 
+    _log_to_guard_label(
+        "run_safety_identifier_salad",
+        "DONE",
+        f"安全神经元识别完成 — 神经元总数={len(all_neurons)}, 安全神经元={len(safety_neurons)}",
+        details={
+            "num_total_neurons": len(all_neurons),
+            "num_safety_neurons": len(safety_neurons),
+        },
+    )
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        _log_to_guard_label(
+            "run_safety_identifier_salad",
+            "ERROR",
+            f"运行异常: {e}",
+            details={"exception": str(e)},
+        )
+        raise

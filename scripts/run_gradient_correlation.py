@@ -107,7 +107,7 @@ else:
             # 最后尝试 /workspace
             sys.path.insert(0, '/workspace')
 
-from engine.neurons.gradient_correlation import compute_gradient_correlation
+from engine.neurons.gradient_dependency import compute_gradient_dependency
 
 
 def check_model_quantization(model) -> Tuple[bool, int, int]:
@@ -567,6 +567,7 @@ def main():
         tokenizer = AutoTokenizer.from_pretrained(args.model_path)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = 'left'
     except Exception as e:
         print(f"[Gradient Correlation] 分词器加载失败: {e}")
         return
@@ -604,7 +605,7 @@ def main():
         print()
     
     try:
-        gradient_correlation = compute_gradient_correlation(
+        gradient_correlation = compute_gradient_dependency(
             model=model,
             tokenizer=tokenizer,
             dataset=dataset,
@@ -614,9 +615,7 @@ def main():
             batch_size=args.batch_size,
             max_length=args.max_length,
             num_samples=args.num_samples,
-            use_gradient_checkpointing=args.use_gradient_checkpointing,
-            selective_gradients=args.selective_gradients,
-            skip_zero_gradients=args.skip_zero_gradients,
+            use_last_token=True,
         )
     except KeyboardInterrupt:
         print("\n[Gradient Correlation] 用户中断")

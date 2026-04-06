@@ -26,7 +26,7 @@ class SaladSafetyDataset(Dataset):
     def __init__(
         self,
         file_path: Union[str, Path],
-        source_type: str = "auto",  # "auto", "defense", "mcq", "evaluation"
+        source_type: str = "auto",  # "auto", "defense", "mcq", "evaluation", "text"
         max_samples: Optional[int] = None,
     ):
         """
@@ -37,6 +37,7 @@ class SaladSafetyDataset(Dataset):
                 - "defense": 防御增强数据集（使用 daugq 字段）
                 - "mcq": 多选题数据集（使用 gt == "A" 的样本）
                 - "evaluation": 评估日志（使用 guard.verdict == "allow" 的样本）
+                - "text": 直接提取 text 或 question 字段
             max_samples: 最大样本数（None 表示全部）
         """
         self.file_path = Path(file_path)
@@ -119,19 +120,19 @@ class SaladSafetyDataset(Dataset):
             # 评估日志：使用安全响应的样本（guard.verdict == "allow"）
             guard = obj.get("guard", {})
             verdict = guard.get("verdict")
-            
+
             if verdict == "allow":
                 input_data = obj.get("input", {})
                 inference = obj.get("inference", {})
-                
+
                 # 提取 prompt 和 output
                 if isinstance(input_data, dict):
                     prompt = input_data.get("prompt")
                 else:
                     prompt = input_data
-                
+
                 output = inference.get("output")
-                
+
                 if prompt and isinstance(prompt, str) and prompt.strip():
                     if output and isinstance(output, str) and output.strip():
                         # 有输出：返回 prompt + output 格式
@@ -142,7 +143,15 @@ class SaladSafetyDataset(Dataset):
                     else:
                         # 只有 prompt：返回 text 格式
                         return {"text": prompt.strip()}
-        
+
+        elif self.source_type == "text" or (
+            self.source_type == "auto" and "question" in obj
+        ):
+            # 直接提取 text 或 question 或 augq 字段（用于带标签的数据集）
+            text = obj.get("text") or obj.get("question") or obj.get("augq")
+            if text and isinstance(text, str) and text.strip():
+                return {"text": text.strip()}
+
         # 如果自动检测失败，尝试通用格式
         if self.source_type == "auto":
             # 尝试提取 text 字段
@@ -169,38 +178,56 @@ class SaladSafetyDataset(Dataset):
 class CombinedSaladSafetyDataset(Dataset):
     """
     组合多个 SALAD 数据集的安全样本
+
+    支持从以下数据集中提取安全部分：
+    1. defense_enhanced_set_train.jsonl - 防御增强的样本（daugq 字段）
+    2. mcq_set_train.jsonl - 多选题中的安全答案（gt == "A" 的样本）
+    3. base_evaluation.jsonl - 评估日志中安全响应的样本（guard.verdict == "allow"）
+    4. 带标签的数据集（label_path） - 外部标签文件标记 Safe/Unsafe
     """
     
     def __init__(
         self,
         file_paths: List[Union[str, Path]],
         source_types: Optional[List[str]] = None,
-        max_samples_per_file: Optional[int] = None,
+        label_paths: Optional[List[Union[str, Path]]] = None,
         max_total_samples: Optional[int] = None,
     ):
         """
         Args:
             file_paths: 数据集文件路径列表
             source_types: 对应的数据源类型列表（None 表示自动检测）
-            max_samples_per_file: 每个文件的最大样本数
-            max_total_samples: 总最大样本数
+            label_paths: 对应的标签文件路径列表（用于过滤 Safe 样本）
+                         格式：每个文件每行 {"original_index": N, "label": "Safe/Unsafe/Controversial"}
+            max_total_samples: 总最大样本数（None 表示全部）
         """
         self.samples: List[Dict[str, Any]] = []
-        
+
         if source_types is None:
             source_types = ["auto"] * len(file_paths)
-        
-        for file_path, source_type in zip(file_paths, source_types):
+        if label_paths is None:
+            label_paths = [None] * len(file_paths)
+
+        for file_path, source_type, label_path in zip(file_paths, source_types, label_paths):
             dataset = SaladSafetyDataset(
                 file_path=file_path,
                 source_type=source_type,
-                max_samples=max_samples_per_file,
+                max_samples=None,  # 先加载全部样本，后面再统一限制
             )
 
-            # 统一样本格式，避免 DataLoader 在默认 collate 时因 key 不一致报错
-            # 目标：所有样本都转成 {"text": "..."} 这一种形式，便于 SNIP 打分
+            # 加载标签文件（如果有）
+            safe_indices = None
+            if label_path is not None:
+                safe_indices = self._load_safe_indices(label_path)
+
+            # 统一样本格式
             normalized_samples: List[Dict[str, Any]] = []
-            for s in dataset.samples:
+            for idx, s in enumerate(dataset.samples):
+                # 如果有标签，只保留 Safe 样本
+                if safe_indices is not None:
+                    if idx not in safe_indices:
+                        continue
+
                 # 已经是 text 的，直接保留
                 if isinstance(s, dict) and "text" in s:
                     text = s.get("text")
@@ -246,26 +273,52 @@ class CombinedSaladSafetyDataset(Dataset):
                 if text:
                     normalized_samples.append({"text": text})
 
-            dataset.samples = normalized_samples
-
+            # 检查是否达到总样本数限制
             remaining = (
                 max_total_samples - len(self.samples)
                 if max_total_samples is not None
                 else None
             )
-            
+
             if remaining is not None and remaining <= 0:
                 break
-            
+
+            # 添加样本（考虑剩余配额）
             if remaining is not None:
-                dataset.samples = dataset.samples[:remaining]
-            
-            self.samples.extend(dataset.samples)
-        
+                normalized_samples = normalized_samples[:remaining]
+
+            self.samples.extend(normalized_samples)
+
         print(
             f"[CombinedSaladSafetyDataset] 总共加载了 {len(self.samples)} 个安全样本"
             f" (来自 {len(file_paths)} 个文件)"
         )
+
+    def _load_safe_indices(self, label_path: Union[str, Path]) -> set:
+        """从标签文件中加载 Safe 样本的索引"""
+        safe_indices = set()
+        label_path = Path(label_path)
+
+        if not label_path.exists():
+            print(f"[CombinedSaladSafetyDataset] 警告: 标签文件不存在: {label_path}")
+            return None
+
+        with open(label_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    original_index = obj.get("original_index")
+                    label = obj.get("label")
+                    if original_index is not None and label == "Safe":
+                        safe_indices.add(original_index)
+                except json.JSONDecodeError:
+                    continue
+
+        print(f"[CombinedSaladSafetyDataset] 从 {label_path.name} 加载了 {len(safe_indices)} 个 Safe 样本")
+        return safe_indices
     
     def __len__(self):
         return len(self.samples)

@@ -29,7 +29,7 @@ def test_meta_llama():
     print(f"\n测试输入: '{test_prompt}'")
     
     inputs = tokenizer(test_prompt, return_tensors="pt").to(device)
-    
+
     with manager.activate_adapters():
         outputs = model.generate(
             **inputs,
@@ -67,7 +67,7 @@ def test_llama_guard():
         print(f"\n测试输入: '{prompt}'")
         
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
-        
+
         with manager.activate_adapters():
             outputs = model.generate(
                 **inputs,
@@ -75,7 +75,7 @@ def test_llama_guard():
                 do_sample=False,
                 pad_token_id=tokenizer.eos_token_id
             )
-        
+
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
         print(f"模型输出: {response}")
     

@@ -2,13 +2,17 @@
 
 基于 Wanda 论文 (Sun et al., ICLR 2024) 的 Utility 评估方法。
 
-评估使用 EleutherAI LM Harness，包括：
-- 零样本任务评估：BoolQ, RTE, HellaSwag, WinoGrande, ARC-e, ARC-c, OBQA
-- WikiText 困惑度计算
+使用内置实现进行零样本任务评估（不使用 lm-eval）：
+- HellaSwag: acc_norm（4 候选 log-likelihood 取最大）
+- WinoGrande: 消歧义填空
+- ARC-e / ARC-c: 多选问答
+- BoolQ / RTE: 自然语言推理
+- OBQA: 科学问答
+- WikiText-2: 困惑度计算
 
 参考论文：
     @inproceedings{sun2024wanda,
-        title     = {A Simple and Effective Pruning Approach for Large Language Models},
+        title     = {A Simple and an Effective Pruning Approach for Large Language Models},
         author    = {Sun, Mingjie and Liu, Zhuang and Bair, Anna and Kolter, J. Zico},
         booktitle = {Proceedings of the International Conference on Learning Representations (ICLR)},
         year      = {2024},
@@ -24,34 +28,21 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
-import time
+import logging
+import re
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import torch
-import torch.nn.functional as F
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# 尝试导入 lm-eval，如果不可用则使用内置实现
-HAS_LM_EVAL = False
-
-try:
-    import lm_eval
-    from lm_eval import evaluator
-    from lm_eval.models.huggingface import HFLM
-    HAS_LM_EVAL = True
-except ImportError as e:
-    HAS_LM_EVAL = False
-    print(f"[Utility Evaluator] 警告: lm-eval 导入失败 ({e})，将使用内置评估方法")
-
-
-# 尝试从 HuggingFace 数据集加载任务数据
+# 尝试从 HuggingFace 数据集加载任务数据（可选，回退到本地已下载数据）
 try:
     from datasets import load_dataset
     HAS_DATASETS = True
@@ -167,9 +158,18 @@ def evaluate_utility(
         "comparison_with_paper": {},
     }
 
-    # 1. 零样本任务评估
+    # 1. 零样本任务评估（带顶层进度条）
     if verbose:
         print(f"[Utility Evaluator] 评估零样本任务...")
+
+    # 顶层进度：7 个任务 + WikiText PPL
+    num_steps = len(tasks) + 1  # 任务数 + WikiText
+    pbar_overall = tqdm(
+        total=num_steps,
+        desc="[Utility] 总体进度",
+        unit="step",
+        disable=not verbose,
+    )
 
     zero_shot_results = evaluate_zero_shot_tasks(
         model=model,
@@ -186,7 +186,10 @@ def evaluate_utility(
     task_accuracies = [v for k, v in zero_shot_results.items() if k != "mean" and isinstance(v, (int, float))]
     results["zero_shot"]["mean"] = sum(task_accuracies) / len(task_accuracies) if task_accuracies else 0.0
 
-    # 2. WikiText 困惑度
+    pbar_overall.update(1)
+    pbar_overall.set_postfix_str(f"已完成 {len(tasks)}/{len(tasks)} 个任务，mean={results['zero_shot']['mean']:.4f}")
+
+    # 2. WikiText 困惑度（带独立进度条）
     if verbose:
         print(f"[Utility Evaluator] 计算 WikiText 困惑度...")
 
@@ -203,6 +206,10 @@ def evaluate_utility(
         if verbose:
             print(f"[Utility Evaluator] 警告: WikiText 数据集未找到，跳过困惑度计算")
         results["wiki_perplexity"] = None
+
+    pbar_overall.update(1)
+    pbar_overall.set_postfix_str(f"PPL={results['wiki_perplexity']:.2f}" if results["wiki_perplexity"] else "PPL=N/A")
+    pbar_overall.close()
 
     # 3. 计算综合 Utility 分数
     results["utility_score"] = _compute_utility_score(
@@ -248,13 +255,15 @@ def evaluate_zero_shot_tasks(
     verbose: bool = True,
 ) -> Dict[str, float]:
     """
-    评估零样本任务
+    评估零样本任务（纯内置实现，不依赖 lm-eval）
+
+    每个任务调用 _evaluate_single_task，按 Wanda 论文协议计算准确率。
 
     Args:
         model: 模型
         tokenizer: 分词器
         tasks: 任务列表
-        batch_size: 批大小
+        batch_size: 批大小（当前实现为逐样本评估）
         max_samples: 最大样本数
         device: 设备
         verbose: 详细输出
@@ -270,32 +279,17 @@ def evaluate_zero_shot_tasks(
 
     results = {}
 
-    # 尝试使用 lm-eval
-    if HAS_LM_EVAL:
-        if verbose:
-            print(f"[Utility Evaluator] 使用 lm-eval 进行评估...")
-
-        try:
-            results = _evaluate_with_lm_eval(
-                model=model,
-                tokenizer=tokenizer,
-                tasks=tasks,
-                device=device,
-                verbose=verbose,
-            )
-            return results
-        except Exception as e:
-            if verbose:
-                print(f"[Utility Evaluator] lm-eval 评估失败: {e}")
-                print(f"[Utility Evaluator] 回退到内置评估方法...")
-
-    # 使用内置评估方法
-    if verbose:
-        print(f"[Utility Evaluator] 使用内置方法进行评估...")
+    # 顶层进度条：显示当前任务及实时准确率
+    pbar = tqdm(
+        total=len(tasks),
+        desc="[Utility] 评估进度",
+        unit="task",
+        disable=not verbose,
+    )
 
     for task in tasks:
         if verbose:
-            print(f"[Utility Evaluator] 评估任务: {task}")
+            print(f"\n[Utility Evaluator] 评估任务: {task}")
 
         try:
             accuracy = _evaluate_single_task(
@@ -305,12 +299,18 @@ def evaluate_zero_shot_tasks(
                 batch_size=batch_size,
                 max_samples=max_samples,
                 device=device,
+                verbose=verbose,
             )
             results[task] = accuracy
         except Exception as e:
             if verbose:
                 print(f"[Utility Evaluator] 任务 {task} 评估失败: {e}")
             results[task] = 0.0
+
+        pbar.update(1)
+        pbar.set_postfix_str(f"当前: {task} = {results[task]:.4f}")
+
+    pbar.close()
 
     return results
 
@@ -392,41 +392,55 @@ def compute_wikitext_perplexity(
 # 内部辅助函数
 # ============================================================================
 
-def _generation_config_new_tokens_only(
+@contextmanager
+def _quiet_transformers_generation_length_warnings():
+    """屏蔽评估循环里每条样本 generate 触发的 max_length/max_new_tokens 重复告警。
+
+    部分 transformers 版本在合并 ``model.generation_config`` 后仍会
+    ``logger.warning``（每条一次）。此处对 ``transformers.generation.utils``
+    临时抬高日志级别；并附加过滤器以防消息走其他 logger。
+    """
+    log = logging.getLogger("transformers.generation.utils")
+
+    class _Filter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            try:
+                m = record.getMessage()
+            except Exception:
+                return True
+            if "max_new_tokens" in m and "max_length" in m and "precedence" in m:
+                return False
+            return True
+
+    f = _Filter()
+    log.addFilter(f)
+    prev_level = log.level
+    log.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        log.setLevel(prev_level)
+        log.removeFilter(f)
+
+
+def _greedy_generate_short_answer(
     model: torch.nn.Module,
     tokenizer: Any,
-    max_new_tokens: int,
-) -> GenerationConfig:
-    “””克隆模型生成配置，仅用 max_new_tokens 限制长度并清空 max_length。
-
-    避免与模型默认 generation_config 中的 max_length 并存时反复触发
-    UserWarning（max_new_tokens 与 max_length 同时”生效”的提示）。
-    “””
-    from copy import deepcopy
-
+    inputs: Any,
+    max_new_tokens: int = 10,
+) -> torch.Tensor:
+    """贪婪解码少量新 token；仅用 kwargs，不传入 GenerationConfig，减少与 hub 默认 max_length 冲突。"""
     pad_id = tokenizer.pad_token_id
-    eos_id = getattr(tokenizer, “eos_token_id”, None)
-    base = getattr(model, “generation_config”, None)
-    if base is not None:
-        cfg = base.clone() if callable(getattr(base, “clone”, None)) else deepcopy(base)
-    elif hasattr(GenerationConfig, “from_model_config”):
-        cfg = GenerationConfig.from_model_config(model.config)
-    else:
-        cfg = GenerationConfig()
-
-    cfg.max_new_tokens = int(max_new_tokens)
-    cfg.do_sample = False
-    cfg.temperature = None  # 禁用采样相关参数
-    cfg.top_p = None
-    cfg.top_k = None
+    eos_id = getattr(tokenizer, "eos_token_id", None)
+    kwargs: Dict[str, Any] = {
+        "max_new_tokens": int(max_new_tokens),
+        "do_sample": False,
+    }
     if pad_id is not None:
-        cfg.pad_token_id = pad_id
+        kwargs["pad_token_id"] = pad_id
     if eos_id is not None:
-        cfg.eos_token_id = eos_id
-    # 确保只使用 max_new_tokens，不使用 max_length
-    if hasattr(cfg, “max_length”):
-        cfg.max_length = None
-    return cfg
+        kwargs["eos_token_id"] = eos_id
+    return model.generate(**inputs, **kwargs)
 
 
 def _load_model(
@@ -437,6 +451,7 @@ def _load_model(
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = 'left'
 
     dtype = torch.bfloat16 if device.type == "cuda" and torch.cuda.is_bf16_supported() else torch.float16
 
@@ -557,11 +572,14 @@ def _evaluate_single_task(
     batch_size: int = 8,
     max_samples: Optional[int] = None,
     device: Optional[Union[str, torch.device]] = None,
+    verbose: bool = True,
 ) -> float:
     """
     评估单个零样本任务
 
-    使用简单的 few-shot prompting 进行评估
+    Wanda 论文评估协议：
+    - HellaSwag: acc_norm（4 候选 log-likelihood 取最大）
+    - 其他任务: 生成 + 解析响应
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -574,35 +592,139 @@ def _evaluate_single_task(
     if not task_data:
         return 0.0
 
+    # HellaSwag 特殊处理：acc_norm（与 Wanda/lm-eval 协议一致）
+    if task == "hellaswag":
+        return _evaluate_hellaswag_accnorm(model, tokenizer, task_data, device, verbose)
+
     correct = 0
     total = 0
 
-    for item in tqdm(task_data, desc=f"{task}", disable=True):
+    # 必须将可迭代对象传给 tqdm；仅 total= 时 for x in pbar 会触发
+    # TypeError: 'NoneType' object is not iterable
+    pbar = tqdm(
+        task_data,
+        total=len(task_data),
+        desc=f"[{task}]",
+        unit="sample",
+        leave=False,
+        disable=not verbose,
+    )
+
+    with _quiet_transformers_generation_length_warnings():
+        for item in pbar:
+            try:
+                prompt = item["prompt"]
+                choices = item.get("choices") or []
+                answer = item.get("answer", 0)
+
+                # 构建输入
+                inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+                with torch.no_grad():
+                    outputs = _greedy_generate_short_answer(model, tokenizer, inputs, max_new_tokens=10)
+
+                response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+                response = response.strip().lower()
+
+                # 简单匹配
+                predicted = _parse_response(response, choices, task)
+
+                if predicted == -1:
+                    # 无法解析，跳过该样本
+                    continue
+                if predicted == answer:
+                    correct += 1
+                total += 1
+
+                # 更新进度条后缀：实时准确率
+                if total > 0:
+                    pbar.set_postfix_str(f"acc={correct/total:.4f}")
+
+            except Exception:
+                continue
+
+    pbar.close()
+
+    accuracy = correct / total if total > 0 else 0.0
+    return accuracy
+
+
+def _evaluate_hellaswag_accnorm(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    task_data: List[Dict],
+    device: torch.device,
+    verbose: bool = True,
+) -> float:
+    """
+    HellaSwag acc_norm 评估
+
+    Wanda 论文: 对每个样本，计算 ctx + 4 个候选 ending 的 log-likelihood，
+    选择 log-likelihood 最高的候选。
+
+    与 lm-eval HellaSwag acc_norm 计算方式一致。
+    """
+    correct = 0
+    total = 0
+
+    # 每个样本 × 4 个候选 ending，每个 ending 内部无 tqdm（避免过度刷屏）
+    pbar = tqdm(
+        task_data,
+        total=len(task_data),
+        desc="[hellaswag]",
+        unit="sample",
+        leave=False,
+        disable=not verbose,
+    )
+
+    for item in pbar:
         try:
-            prompt = item["prompt"]
-            choices = item.get("choices", [])
+            ctx = item.get("prompt", "")
+            ends = item.get("ends", item.get("choices", []))
             answer = item.get("answer", 0)
 
-            # 构建输入
-            inputs = tokenizer(prompt, return_tensors="pt").to(device)
+            if not ctx or len(ends) < 4:
+                continue
 
-            # 生成（显式 GenerationConfig，避免 max_length 与 max_new_tokens 并存刷屏警告）
-            gen_cfg = _generation_config_new_tokens_only(model, tokenizer, 10)
-            with torch.no_grad():
-                outputs = model.generate(**inputs, generation_config=gen_cfg)
+            # 计算 ctx + 每个 ending 的 log-likelihood
+            log_liks = []
+            for end_text in ends:
+                text = ctx + " " + end_text
 
-            response = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-            response = response.strip().lower()
+                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
+                input_ids = inputs.input_ids.to(device)
 
-            # 简单匹配
-            predicted = _parse_response(response, choices, task)
+                with torch.no_grad():
+                    outputs = model(input_ids)
+                    logits = outputs.logits  # [1, seq, vocab]
 
+                # log_softmax
+                log_probs = torch.log_softmax(logits[0], dim=-1)  # [seq, vocab]
+
+                # 移位: logits[i] 预测 token i+1
+                # 目标: 整个序列（不含首个 token 的 log_prob）
+                target_ids = input_ids[0, 1:]  # 去掉首 token
+                pred_logits = log_probs[:-1, :]  # [seq-1, vocab]
+
+                # log_likelihood = sum(log_p(target_i))
+                token_log_probs = pred_logits[range(len(target_ids)), target_ids]
+                log_lik = token_log_probs.sum().item()
+                log_liks.append(log_lik)
+
+            # 选择 log-likelihood 最高的候选
+            predicted = int(torch.argmax(torch.tensor(log_liks)).item())
             if predicted == answer:
                 correct += 1
             total += 1
 
+            # 更新进度条后缀：实时准确率
+            if total > 0:
+                pbar.set_postfix_str(f"acc={correct/total:.4f}")
+
         except Exception:
             continue
+
+    pbar.close()
 
     accuracy = correct / total if total > 0 else 0.0
     return accuracy
@@ -786,34 +908,62 @@ def _get_mock_task_data(task: str, max_samples: Optional[int] = None) -> List[Di
 def _convert_to_prompt_format(task: str, item: Dict) -> Optional[Dict]:
     """将原始数据集项转换为 prompt 格式
 
+    严格遵循 Wanda 论文的评估协议：
+    - HellaSwag: 完形填空（带 4 个候选项），使用 acc_norm（4 候选 log-likelihood 取最大）
+    - WinoGrande: 消歧义填空（_ 替换为选项）
+    - ARC: 多选问答（ABCD）
+    - BoolQ/RTE: 自然语言推理（Yes/No 或 entail/not_entail）
+    - OBQA: 多选科学问答（ABCD）
+
     Args:
         task: 任务名称
         item: 原始数据项
 
     Returns:
-        转换后的样本字典
+        转换后的样本字典，包含 prompt / choices / answer / ends（acc_norm 专用）
     """
     try:
         if task == "hellaswag":
             ctx_a = item.get("ctx_a", "")
             ctx_b = item.get("ctx_b", "")
-            activity_label = item.get("activity_label", "")
             endings = item.get("endings", [])
+            answer_str = str(item.get("answer", "0")).strip()
+
+            # prompt = 前缀上下文（不含选项）
             prompt = f"{ctx_a} {ctx_b}"
-            choices = [endings[i] if i < len(endings) else "" for i in range(4)]
-            # 答案在 activity_label 中，需要解析
-            answer = 0  # 默认值
-            return {"prompt": prompt, "choices": choices, "answer": answer}
+
+            # choices = 4 个候选项
+            if len(endings) < 4:
+                return None
+            choices = [endings[i] for i in range(4)]
+
+            # ends = 4 个候选项文本（用于 acc_norm 计算，与 lm-eval 协议一致）
+            ends = choices
+
+            try:
+                answer = int(answer_str)
+            except (ValueError, TypeError):
+                answer = 0
+
+            return {"prompt": prompt, "choices": choices, "answer": answer, "ends": ends}
 
         elif task == "winogrande":
             sentence = item.get("sentence", "")
             option1 = item.get("option1", "")
             option2 = item.get("option2", "")
-            answer = item.get("answer", "1")
-            # 替换 _ 填空
-            prompt = sentence.replace("_", option1 if answer == "1" else option2)
+            answer_str = str(item.get("answer", "1")).strip()
+
+            # Wanda: 替换 _ 为选项形成完整句子
+            option = option1 if answer_str == "1" else option2
+            prompt = sentence.replace("_", option).strip()
             choices = [option1, option2]
-            return {"prompt": prompt, "choices": choices, "answer": int(answer) - 1}
+
+            try:
+                answer = int(answer_str) - 1
+            except (ValueError, TypeError):
+                answer = 0
+
+            return {"prompt": prompt, "choices": choices, "answer": answer}
 
         elif task.startswith("arc_"):
             question = item.get("question", "")
@@ -823,34 +973,68 @@ def _convert_to_prompt_format(task: str, item: Dict) -> Optional[Dict]:
             answer_text = item.get("answerKey", "A")
             # 转换字母答案为索引
             answer_idx = ord(answer_text.upper()) - ord('A') if len(answer_text) == 1 else 0
-            choices_text = [f"{chr(ord('A') + i)}) {text}" for i, text in enumerate(texts)]
-            prompt = question + "\n" + "\n".join(choices_text)
-            return {"prompt": prompt, "choices": texts, "answer": answer_idx}
+            # prompt = 问题 + 选项（带 A) B) C) D) 标签）
+            prompt = question + "\n"
+            choice_labels = []
+            for i, text in enumerate(texts):
+                label = f"{chr(ord('A') + i)})"
+                prompt += f"{label} {text}\n"
+                choice_labels.append(text)
+
+            try:
+                answer_idx = ord(answer_text.upper()) - ord('A')
+                if answer_idx < 0 or answer_idx >= len(texts):
+                    answer_idx = 0
+            except (ValueError, TypeError):
+                answer_idx = 0
+
+            return {"prompt": prompt.strip(), "choices": choice_labels, "answer": answer_idx}
 
         elif task == "obqa":
             question_stem = item.get("question_stem", "")
-            choices = item.get("choices", [])
-            texts = choices.get("text", []) if isinstance(choices, dict) else []
-            label_key = choices.get("label", []) if isinstance(choices, dict) else []
-            answer_text = item.get("answerKey", "A")
-            answer_idx = ord(answer_text.upper()) - ord('A') if len(answer_text) == 1 else 0
-            choices_text = [f"{chr(ord('A') + i)}) {text}" for i, text in enumerate(texts)]
-            prompt = question_stem + "\n" + "\n".join(choices_text)
-            return {"prompt": prompt, "choices": texts, "answer": answer_idx}
+            choices_data = item.get("choices", {})
+            answer_text = str(item.get("answerKey", "A")).strip()
+
+            if isinstance(choices_data, dict):
+                texts = choices_data.get("text", [])
+            else:
+                texts = list(choices_data) if choices_data else []
+
+            prompt = question_stem + "\n"
+            choice_labels = []
+            for i, text in enumerate(texts):
+                label = f"{chr(ord('A') + i)})"
+                prompt += f"{label} {text}\n"
+                choice_labels.append(text)
+
+            try:
+                answer_idx = ord(answer_text.upper()) - ord('A')
+                if answer_idx < 0 or answer_idx >= len(texts):
+                    answer_idx = 0
+            except (ValueError, TypeError):
+                answer_idx = 0
+
+            return {"prompt": prompt.strip(), "choices": choice_labels, "answer": answer_idx}
 
         elif task == "boolq":
             passage = item.get("passage", "")
             question = item.get("question", "")
-            answer = item.get("answer", False)
+            # SuperGLUE jsonl 使用 label（0/1），部分来源使用 answer
+            raw = item.get("answer", item.get("label", False))
+            answer = bool(raw) if isinstance(raw, (bool, int)) else str(raw).lower() in ("true", "1", "yes")
             prompt = f"Passage: {passage}\nQuestion: {question}\nAnswer:"
             return {"prompt": prompt, "choices": ["True", "False"], "answer": 1 if answer else 0}
 
         elif task == "rte":
             premise = item.get("premise", "")
             hypothesis = item.get("hypothesis", "")
-            answer = item.get("label", 0)
-            prompt = f"Premise: {premise}\nHypothesis: {hypothesis}\nDoes the hypothesis entail the premise?"
-            return {"prompt": prompt, "choices": ["Yes", "No"], "answer": answer}
+            label = item.get("label", 0)
+
+            # Wanda 使用 entailment 判断
+            prompt = f"{premise}\n{hypothesis}\nAnswer:"
+            choices = ["Yes", "No"]
+            answer = 1 if label in (1, "entailment", "entail") else 0
+            return {"prompt": prompt, "choices": choices, "answer": answer}
 
     except Exception as e:
         print(f"[Utility Evaluator] 转换数据格式失败 ({task}): {e}")
@@ -860,357 +1044,59 @@ def _convert_to_prompt_format(task: str, item: Dict) -> Optional[Dict]:
 
 
 def _parse_response(response: str, choices: List[str], task: str) -> int:
-    """解析模型响应获取答案索引"""
+    """解析模型响应获取答案索引
+
+    策略（按优先级递减）：
+    1. 精确匹配选项文本（或前3个词）
+    2. 匹配选项字母 (a/b/c/d)
+    3. 匹配 True/False / Yes/No 关键词
+    4. 匹配数字 1/2/3/4
+    5. 若完全无法匹配，返回 -1（表示不确定），由调用方处理
+    """
+    if not choices:
+        return -1
+
     response = response.lower().strip()
 
-    # 尝试匹配选项
+    # 候选字母（a, b, c, d）
+    letters = [chr(ord('a') + i) for i in range(len(choices))]
+
+    # 策略 1: 精确匹配选项文本或前3词
     for i, choice in enumerate(choices):
         choice_text = choice.lower().strip()
+        if not choice_text:
+            continue
+        # 完整匹配
         if choice_text in response:
             return i
-        if choice_text[:3] in response:
+        # 前3词匹配（避免过长选项导致匹配失败）
+        short = " ".join(choice_text.split()[:3])
+        if short in response:
             return i
 
-    # 尝试匹配字母
-    for i in range(len(choices)):
-        letter = chr(ord('a') + i)
-        if letter in response or letter.upper() in response:
+    # 策略 2: 匹配字母 (a/b/c/d)
+    for i, letter in enumerate(letters):
+        if f"({letter})" in response or f"({letter.upper()})" in response:
+            return i
+        if response.startswith(letter + ".") or response.startswith(letter + ")"):
             return i
 
-    return 0
+    # 策略 3: 匹配 True/False / Yes/No
+    for i, choice in enumerate(choices):
+        text = choice.lower().strip()
+        if text in ("true", "false", "yes", "no"):
+            if text in response:
+                return i
 
+    # 策略 4: 匹配数字 1/2/3/4
+    num_match = re.search(r'\b([1-4])\b', response)
+    if num_match:
+        idx = int(num_match.group(1)) - 1
+        if 0 <= idx < len(choices):
+            return idx
 
-def _evaluate_with_lm_eval(
-    model: torch.nn.Module,
-    tokenizer: Any,
-    tasks: List[str],
-    device: torch.device,
-    verbose: bool = True,
-) -> Dict[str, float]:
-    """使用 lm-eval 库进行评估（支持 lm-eval >= 0.4.x API）
-
-    Args:
-        model: 模型
-        tokenizer: 分词器
-        tasks: 任务列表
-        device: 设备
-        verbose: 详细输出
-
-    Returns:
-        各任务的准确率字典
-    """
-    if not HAS_LM_EVAL:
-        raise ImportError("lm-eval 不可用")
-
-    try:
-        # 尝试新版本 API (>= 0.4.0)
-        from lm_eval import tasks as lm_tasks
-        task_dict = lm_tasks.get_task_dict(tasks)
-
-        # 创建 lm-eval 模型包装
-        class WrapperLM(HFLM):
-            def __init__(self, model, tokenizer, device):
-                # 直接使用已加载的模型
-                self._model = model
-                self._tokenizer = tokenizer
-                self._device = device
-                super().__init__(
-                    pretrained=model,
-                    tokenizer=tokenizer,
-                    device=str(device),
-                )
-
-        results = evaluator.evaluate(
-            lm=WrapperLM(model, tokenizer, device),
-            task_dict=task_dict,
-            log_samples=False,
-        )
-    except (ImportError, AttributeError):
-        try:
-            # 尝试旧版本 API (< 0.4.0)
-            results = evaluator.evaluate(
-                model=model,
-                model_args=f"tokenizer={tokenizer.__class__.__name__},device={device}",
-                tasks=tasks,
-                verbose=verbose,
-            )
-        except Exception:
-            # 尝试直接使用 lm_eval.api.request_factory
-            print("[Utility Evaluator] 警告: lm-eval API 调用失败，尝试备用方法")
-            return _evaluate_with_lm_eval_simple(model, tokenizer, tasks, device, verbose)
-
-    # 提取结果
-    task_results = {}
-    results_dict = results.get("results", {})
-
-    for task_name in tasks:
-        if task_name in results_dict:
-            task_res = results_dict[task_name]
-            # 尝试多种可能的准确率键
-            for key in ("acc", "accuracy", "acc_norm", "wer", "perplexity"):
-                if key in task_res:
-                    task_results[task_name] = float(task_res[key])
-                    break
-            else:
-                # 如果没有找到准确率键，尝试查找任何数值结果
-                for key, value in task_res.items():
-                    if isinstance(value, (int, float)):
-                        task_results[task_name] = float(value)
-                        break
-                else:
-                    task_results[task_name] = 0.0
-        else:
-            task_results[task_name] = 0.0
-
-    return task_results
-
-
-def _evaluate_with_lm_eval_simple(
-    model: torch.nn.Module,
-    tokenizer: Any,
-    tasks: List[str],
-    device: torch.device,
-    verbose: bool = True,
-) -> Dict[str, float]:
-    """简化的 lm-eval 评估方法（备用）
-
-    Args:
-        model: 模型
-        tokenizer: 分词器
-        tasks: 任务列表
-        device: 设备
-        verbose: 详细输出
-
-    Returns:
-        各任务的准确率字典
-    """
-    try:
-        from lm_eval.api.model import LM
-        from lm_eval.api.tasks import TaskConfig
-
-        # 创建一个简单的包装类
-        class SimpleHFLM(LM):
-            def __init__(self, model, tokenizer, device):
-                self.model = model
-                self.tokenizer = tokenizer
-                self._device = device
-                self.model.eval()
-                # 设置 pad_token_id 避免生成警告
-                if self.tokenizer.pad_token_id is None:
-                    self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-
-            def loglikelihood(self, requests):
-                """计算 token pairs 的对数似然
-
-                lm-eval 期望返回: List[Tuple[float, bool]]
-                - float: 对数似然值
-                - bool: 是否截断（is_greedy）
-                """
-                results = []
-                for request in requests:
-                    # lm-eval 的 requests 是 TaskRequest 对象，
-                    # ctx 和 cont 部分可以通过 get_selection 获取
-                    try:
-                        if hasattr(request, "get_selection"):
-                            # 新版本 lm-eval (>= 0.4.0) 使用 get_selection
-                            selections = request.get_selection(reqs=[request])
-                            ctx = selections.get("ctx", "")
-                            cont = selections.get("continuations", [("", {})])[0]
-                            if isinstance(cont, dict):
-                                cont_str = cont.get("text", "")
-                            else:
-                                cont_str = str(cont)
-                        else:
-                            # 兼容旧版本
-                            ctx = getattr(request, "ctx", "")
-                            cont = getattr(request, "cont", "")
-
-                        if not ctx and not cont:
-                            results.append((0.0, False))
-                            continue
-
-                        # Tokenize
-                        inputs = self.tokenizer(ctx, return_tensors="pt", truncation=True, max_length=2048)
-                        input_ids = inputs.input_ids.to(self._device)
-                        input_len = input_ids.shape[1]
-
-                        # 对 continuation 进行 tokenize（不添加特殊 token）
-                        cont_inputs = self.tokenizer(cont, return_tensors="pt", truncation=True, max_length=2048)
-                        cont_ids = cont_inputs.input_ids.to(self._device)
-                        # 移除前缀空格等
-                        cont_ids = cont_ids[0, 1:] if cont_ids[0, 0] == self.tokenizer.bos_token_id else cont_ids[0]
-
-                        # 拼接计算 log-likelihood
-                        target_ids = cont_ids.unsqueeze(0)
-
-                        with torch.no_grad():
-                            outputs = self.model(input_ids)
-                            logits = outputs.logits[0]  # [seq_len, vocab_size]
-
-                        # 计算 log probabilities
-                        log_probs = torch.log_softmax(logits, dim=-1)
-
-                        # 计算 log-likelihood: sum(log_p(target_tokens))
-                        # logits[i] 预测的是 token i+1，所以取 [input_len-1:-1]
-                        start_idx = input_len - 1
-                        end_idx = start_idx + target_ids.shape[1]
-
-                        if end_idx > log_probs.shape[0]:
-                            # 序列不够长，截断
-                            results.append((0.0, True))
-                            continue
-
-                        token_log_probs = log_probs[start_idx:end_idx, target_ids[0]]
-                        log_likelihood = token_log_probs.sum().item()
-
-                        # is_greedy: True 表示 greedy 解码（即下一个 token 是概率最高的）
-                        # 这里返回 False 表示我们有完整概率
-                        results.append((log_likelihood, False))
-
-                    except Exception as e:
-                        if verbose:
-                            print(f"[SimpleHFLM] loglikelihood error: {e}")
-                        results.append((0.0, False))
-
-                return results
-
-            def loglikelihood_rolling(self, requests):
-                """计算 rolling token 的对数似然（用于 perplexity）"""
-                results = []
-                for request in requests:
-                    try:
-                        text = request.args[0] if request.args else ""
-                        inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
-                        input_ids = inputs.input_ids.to(self._device)
-
-                        with torch.no_grad():
-                            outputs = self.model(input_ids)
-                            logits = outputs.logits  # [batch, seq, vocab]
-
-                        log_probs = torch.log_softmax(logits, dim=-1)
-
-                        # 移位：logits[i] 预测 token i+1
-                        # target = input_ids[:, 1:]
-                        # pred = log_probs[:, :-1, :]
-                        # log_lik = gather(pred, dim=-1, index=target.unsqueeze(-1)).squeeze(-1).sum()
-                        target_ids = input_ids[:, 1:]
-                        pred_logits = log_probs[:, :-1, :]
-
-                        # 使用 torch.gather
-                        gathered = torch.gather(pred_logits, 2, target_ids.unsqueeze(-1)).squeeze(-1)
-                        log_likelihood = gathered.sum(dim=-1).item()
-
-                        results.append((log_likelihood, False))
-
-                    except Exception as e:
-                        if verbose:
-                            print(f"[SimpleHFLM] loglikelihood_rolling error: {e}")
-                        results.append((0.0, False))
-
-                return results
-
-            def generate_until(self, requests):
-                results = []
-                for request in requests:
-                    try:
-                        if hasattr(request, "args") and request.args:
-                            prompt = request.args[0]
-                        elif hasattr(request, "kwargs") and request.kwargs:
-                            prompt = request.kwargs.get("text", "")
-                        else:
-                            prompt = str(request)
-
-                        until = getattr(request, "until", None) or ["<|endoftext|>"]
-
-                        inputs = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
-                        input_ids = inputs.input_ids.to(self._device)
-
-                        max_gen_tokens = getattr(request, "max_gen_tokens", 20)
-
-                        gen_cfg = _generation_config_new_tokens_only(
-                            self.model, self.tokenizer, max_gen_tokens
-                        )
-                        with torch.no_grad():
-                            outputs = self.model.generate(
-                                input_ids, generation_config=gen_cfg
-                            )
-
-                        generated = self.tokenizer.decode(outputs[0][input_ids.shape[1]:], skip_special_tokens=True)
-
-                        # 截断到 until token
-                        for stop_tok in until:
-                            if stop_tok in generated:
-                                generated = generated.split(stop_tok)[0]
-                        results.append(generated)
-
-                    except Exception as e:
-                        if verbose:
-                            print(f"[SimpleHFLM] generate_until error: {e}")
-                        results.append("")
-
-                return results
-
-        simple_lm = SimpleHFLM(model, tokenizer, device)
-
-        # 手动加载任务并评估（兼容不同 lm-eval 版本）
-        task_results = {}
-        for task_name in tasks:
-            try:
-                # 方法 1: 尝试使用 lm_eval.api.registry（0.4.0+）
-                from lm_eval.api import registry as lm_registry
-                task_config = lm_registry.get_task(task_name)
-                if task_config is not None:
-                    results = task_config.evaluate(simple_lm)
-                    acc = results.get("acc",
-                              results.get("accuracy",
-                              results.get("acc_norm", 0.0)))
-                    task_results[task_name] = float(acc)
-                    continue
-            except Exception:
-                pass
-
-            try:
-                # 方法 2: 尝试使用 lm_eval.tasks.get_task_dict
-                from lm_eval import tasks as lm_tasks
-                task_dict = lm_tasks.get_task_dict([task_name])
-                if task_name in task_dict and task_dict[task_name] is not None:
-                    task_obj = task_dict[task_name]
-                    if hasattr(task_obj, "process_results") and hasattr(task_obj, "construct_requests"):
-                        # lm-eval 0.4.x task object
-                        results = evaluator.evaluate(
-                            lm=simple_lm,
-                            task_dict={task_name: task_obj},
-                            log_samples=False,
-                        )
-                        res = results.get("results", {}).get(task_name, {})
-                        acc = res.get("acc", res.get("accuracy", res.get("acc_norm", 0.0)))
-                        task_results[task_name] = float(acc)
-                        continue
-            except Exception:
-                pass
-
-            # 方法 3: 回退到内置评估（基于 HuggingFace datasets）
-            try:
-                task_data = _load_task_data(task_name, max_samples=None)
-                if task_data:
-                    accuracy = _evaluate_single_task(
-                        model, tokenizer, task_name, batch_size=8,
-                        max_samples=None, device=device,
-                    )
-                    task_results[task_name] = float(accuracy)
-                else:
-                    task_results[task_name] = 0.0
-            except Exception as e:
-                if verbose:
-                    print(f"[Utility Evaluator] 任务 {task_name} 评估失败: {e}")
-                task_results[task_name] = 0.0
-
-        return task_results
-
-    except Exception as e:
-        if verbose:
-            print(f"[Utility Evaluator] 简化 lm-eval 评估失败: {e}")
-        return {task: 0.0 for task in tasks}
+    # 完全无法匹配：返回 -1，让调用方跳过或计入错误
+    return -1
 
 
 # ============================================================================

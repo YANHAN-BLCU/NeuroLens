@@ -74,7 +74,7 @@ import json
 import argparse
 import torch
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from typing import Dict, Tuple, Optional
 
 # 添加工作目录到路径
@@ -97,6 +97,36 @@ else:
             sys.path.insert(0, '/workspace')
 
 from engine.neurons.parameter_alignment import compute_parameter_alignment, save_parameter_alignment
+
+
+def _log_to_guard_label(
+    script_name: str,
+    status: str,
+    message: str,
+    details: dict = None,
+) -> None:
+    """向 logs/guard_label.log 追加一条结构化运行记录（JSONL 格式）。"""
+    import datetime
+    import json as _json
+
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "guard_label.log"
+
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "script": script_name,
+        "status": status,
+        "message": message,
+    }
+    if details:
+        entry["details"] = details
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def load_target_neurons(neurons_file: str) -> Optional[Dict[Tuple[int, int], Dict]]:
@@ -261,7 +291,18 @@ def main():
     )
     
     args = parser.parse_args()
-    
+
+    _log_to_guard_label(
+        "run_parameter_alignment",
+        "START",
+        f"参数对齐分析启动",
+        details={
+            "model_path": args.model_path,
+            "toxic_vectors_path": args.toxic_vectors_path,
+            "target_neurons_path": args.target_neurons_path,
+        },
+    )
+
     # 打印配置信息
     print("========================================")
     print("参数对齐分析 - Parameter Alignment")
@@ -345,6 +386,9 @@ def main():
     # 加载模型
     print("[Parameter Alignment] 加载模型和分词器...")
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = 'left'
     
     # 准备模型加载参数
     model_kwargs = {
@@ -352,15 +396,19 @@ def main():
         'low_cpu_mem_usage': args.low_cpu_mem_usage,
     }
     
-    # 添加量化参数
+    # 量化：使用 quantization_config，避免 load_in_4bit 等 kwargs 泄漏到 LlamaForCausalLM.__init__
+    # （部分 transformers / 环境下直接传 load_in_4bit 会触发 TypeError）
     if args.load_in_8bit:
-        model_kwargs['load_in_8bit'] = True
-        # 8-bit 量化时，device_map 会自动处理
+        model_kwargs['quantization_config'] = BitsAndBytesConfig(load_in_8bit=True)
         if device.type == 'cuda':
             model_kwargs['device_map'] = {"": device}
     elif args.load_in_4bit:
-        model_kwargs['load_in_4bit'] = True
-        # 4-bit 量化时，device_map 会自动处理
+        model_kwargs['quantization_config'] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch_dtype,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
         if device.type == 'cuda':
             model_kwargs['device_map'] = {"": device}
     else:
@@ -436,7 +484,7 @@ def main():
     print("=" * 50)
     parameter_alignment = compute_parameter_alignment(
         model=model,
-        toxic_vectors_path=args.toxic_vectors_path,
+        toxic_vectors=args.toxic_vectors_path,
         target_neurons=target_neurons,
     )
     print("=" * 50)
@@ -486,6 +534,25 @@ def main():
     print(f"结果已保存到: {output_file}")
     print("=" * 50)
 
+    _log_to_guard_label(
+        "run_parameter_alignment",
+        "DONE",
+        f"参数对齐分析完成 — 神经元数={len(parameter_alignment)}, 输出={output_file}",
+        details={
+            "num_neurons": len(parameter_alignment),
+            "output_path": str(output_file),
+        },
+    )
+
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        _log_to_guard_label(
+            "run_parameter_alignment",
+            "ERROR",
+            f"运行异常: {e}",
+            details={"exception": str(e)},
+        )
+        raise

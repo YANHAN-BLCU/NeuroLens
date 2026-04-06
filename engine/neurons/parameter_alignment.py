@@ -6,13 +6,288 @@
 功能：
 - 计算每个目标神经元的W_down行向量与毒性向量w_toxic的余弦相似度
 - 判断参数对齐方向（S+为正对齐，S-为负对齐）
+- 支持从探针输出加载毒性向量（enhanced 模式）
 """
 
 import numpy as np
 import torch
 import torch.nn as nn
-from typing import Dict, Tuple, Optional
+import json
+from typing import Dict, Tuple, Optional, Union, List
 from pathlib import Path
+
+
+# ============================================================================
+# 探针毒性向量加载器（与 activation_projection.py 保持一致）
+# ============================================================================
+
+def load_toxic_vectors_for_parameter_alignment(
+    probe_output_dir: Union[str, Path] = "outputs",
+    prefer_layer: Optional[int] = None,
+    target_layers: Optional[List[int]] = None,
+) -> Tuple[Dict[int, np.ndarray], Dict[int, Dict]]:
+    """
+    从探针输出目录加载毒性向量用于参数对齐分析。
+
+    支持多种数据格式：
+    新格式（engine/probes/linear_probe_balanced.py）：
+        - outputs/probes/model_id/layer_XX/probe.pt
+        - outputs/probes/model_id/layer_XX/toxic_vector.npz
+        - outputs/probes/model_id/layer_XX/metrics.json
+    旧格式（scripts/train_linear_probe_labels.py）：
+        - outputs/linear_probes/layers/layerXX/toxic_vector.npz
+        - outputs/linear_probes/layers/layerXX/metrics.json
+    聚合格式：
+        - outputs/toxicity_vectors/all_layers_toxicity_vectors.json
+
+    Args:
+        probe_output_dir: 探针输出目录
+        prefer_layer: 优先使用的层（单层模式）
+        target_layers: 目标层列表（多层模式，自动选择可用层）
+
+    Returns:
+        Tuple[Dict, Dict]: (vectors, metadata)
+    """
+    import re
+    probe_output_dir = Path(probe_output_dir)
+    vectors = {}
+    metadata = {}
+
+    def _get_layer_idx(name: str) -> Optional[int]:
+        match = re.match(r'layer_(\d+)', name)
+        if match:
+            return int(match.group(1))
+        match = re.match(r'layer(\d+)', name)
+        if match:
+            return int(match.group(1))
+        return None
+
+    # 策略1: 新格式 outputs/probes/model_id/layer_XX/
+    probes_dir = probe_output_dir / "probes"
+    if probes_dir.exists():
+        for model_folder in sorted(probes_dir.iterdir()):
+            if not model_folder.is_dir():
+                continue
+            for layer_folder in sorted(model_folder.iterdir()):
+                if not layer_folder.is_dir():
+                    continue
+                layer_idx = _get_layer_idx(layer_folder.name)
+                if layer_idx is None or layer_idx in vectors:
+                    continue
+
+                meta = {}
+
+                # 加载 toxic_vector.npz（优先）
+                toxic_npz = layer_folder / "toxic_vector.npz"
+                if toxic_npz.exists():
+                    try:
+                        data = np.load(toxic_npz, allow_pickle=True)
+                        if 'w_toxic' in data:
+                            vectors[layer_idx] = data['w_toxic']
+                        elif 'w_toxic_normalized' in data:
+                            vectors[layer_idx] = data['w_toxic_normalized']
+                        meta['b'] = float(data.get('b', 0.0))
+                    except Exception:
+                        pass
+
+                # 从 probe.pt 提取
+                if layer_idx not in vectors:
+                    probe_pt = layer_folder / "probe.pt"
+                    if probe_pt.exists():
+                        try:
+                            ckpt = torch.load(probe_pt, map_location='cpu', weights_only=False)
+                            if 'linear.weight' in ckpt:
+                                w = ckpt['linear.weight']
+                                if w.shape[0] == 2:
+                                    vectors[layer_idx] = (w[1] - w[0]).cpu().numpy()
+                            elif 'fc.weight' in ckpt:
+                                w = ckpt['fc.weight']
+                                if w.shape[0] == 2:
+                                    vectors[layer_idx] = (w[1] - w[0]).cpu().numpy()
+                        except Exception:
+                            pass
+
+                # 加载 metrics.json
+                metrics_json = layer_folder / "metrics.json"
+                if metrics_json.exists():
+                    try:
+                        with open(metrics_json, 'r', encoding='utf-8') as f:
+                            metrics = json.load(f)
+                        if 'val_acc' in metrics:
+                            meta['cv_accuracy'] = float(metrics['val_acc'])
+                            meta['val_acc'] = float(metrics['val_acc'])
+                        elif 'avg_val_acc' in metrics:
+                            meta['cv_accuracy'] = float(metrics['avg_val_acc'])
+                        meta['std'] = float(metrics.get('std', metrics.get('std_val_acc', 0)))
+                        if 'val_roc_auc' in metrics:
+                            meta['val_roc_auc'] = float(metrics['val_roc_auc'])
+                        if 'val_pr_auc' in metrics:
+                            meta['val_pr_auc'] = float(metrics['val_pr_auc'])
+                    except Exception:
+                        pass
+
+                if layer_idx in vectors and meta:
+                    metadata[layer_idx] = meta
+
+    # 策略2: 旧格式 outputs/linear_probes/layers/
+    if not vectors:
+        layers_dir = probe_output_dir / "linear_probes" / "layers"
+        if layers_dir.exists():
+            for layer_folder in sorted(layers_dir.iterdir()):
+                if layer_folder.is_dir() and layer_folder.name.startswith("layer"):
+                    layer_idx = _get_layer_idx(layer_folder.name)
+                    if layer_idx is None or layer_idx in vectors:
+                        continue
+
+                    meta = {}
+                    toxic_npz = layer_folder / "toxic_vector.npz"
+                    metrics_json = layer_folder / "metrics.json"
+
+                    if toxic_npz.exists():
+                        try:
+                            data = np.load(toxic_npz, allow_pickle=True)
+                            vectors[layer_idx] = data['w_toxic']
+                            meta['b'] = float(data['b']) if 'b' in data else 0.0
+                        except Exception:
+                            pass
+
+                    if metrics_json.exists():
+                        try:
+                            with open(metrics_json, 'r') as f:
+                                metrics = json.load(f)
+                            meta['cv_accuracy'] = metrics.get('avg_val_acc',
+                                                             metrics.get('val_acc', 0.0))
+                            meta['std'] = metrics.get('std_val_acc', 0)
+                        except Exception:
+                            pass
+
+                    if layer_idx in vectors and meta:
+                        metadata[layer_idx] = meta
+
+    # 策略3: outputs/toxicity_vectors/
+    if not vectors:
+        toxicity_dir = probe_output_dir / "toxicity_vectors"
+        if toxicity_dir.exists():
+            all_vectors_path = toxicity_dir / "all_layers_toxicity_vectors.json"
+            if all_vectors_path.exists():
+                try:
+                    with open(all_vectors_path, 'r') as f:
+                        all_data = json.load(f)
+
+                    if 'vectors' in all_data and 'layer_indices' in all_data:
+                        for idx, layer_idx in enumerate(all_data['layer_indices']):
+                            layer_idx = int(layer_idx)
+                            vectors[layer_idx] = np.array(all_data['vectors'][idx])
+                            metadata[layer_idx] = {
+                                'cv_accuracy': all_data.get('cv_accuracies', {}).get(str(layer_idx), 0.0),
+                                'std': all_data.get('stds', {}).get(str(layer_idx), 0.0),
+                            }
+                except Exception:
+                    pass
+
+    if not vectors:
+        print(f"[Parameter Alignment] 警告: 未能从 {probe_output_dir} 加载毒性向量")
+        return {}, {}
+
+    print(f"[Parameter Alignment] 加载了 {len(vectors)} 层的毒性向量")
+
+    # 打印层质量
+    if metadata:
+        sorted_meta = sorted(metadata.items(), key=lambda x: x[1].get('cv_accuracy', 0), reverse=True)
+        print(f"[Parameter Alignment] 毒性向量质量（前5层）:")
+        for layer_idx, meta in sorted_meta[:5]:
+            acc = meta.get('cv_accuracy', 0) * 100
+            std = meta.get('std', 0) * 100
+            print(f"  Layer {layer_idx:2d}: CV Acc = {acc:.2f}%, Std = {std:.2f}%")
+
+    return vectors, metadata
+
+
+def select_optimal_layers_for_alignment(
+    metadata: Dict[int, Dict],
+    num_layers_to_select: int = 5,
+    strategy: str = "accuracy_stability",
+) -> List[int]:
+    """
+    根据探针元数据选择最佳的参数对齐分析层。
+
+    Args:
+        metadata: 各层的元数据（包含 cv_accuracy 和 std）
+        num_layers_to_select: 选择的最优层数
+        strategy: 选择策略
+            - "accuracy": 只看准确率
+            - "stability": 只看稳定性（标准差）
+            - "accuracy_stability": 综合准确率和稳定性
+            - "layer_coverage": 跨层分布选择（覆盖多个层级）
+
+    Returns:
+        List[int]: 选定的层索引列表
+    """
+    if not metadata:
+        # 默认返回探针报告中推荐的层
+        return [28, 31, 15, 14, 20][:num_layers_to_select]
+
+    if strategy == "accuracy":
+        # 只看准确率
+        sorted_layers = sorted(metadata.items(),
+                             key=lambda x: x[1].get('cv_accuracy', 0),
+                             reverse=True)
+        return [l for l, _ in sorted_layers[:num_layers_to_select]]
+
+    elif strategy == "stability":
+        # 只看稳定性
+        sorted_layers = sorted(metadata.items(),
+                              key=lambda x: x[1].get('std', float('inf')))
+        return [l for l, _ in sorted_layers[:num_layers_to_select]]
+
+    elif strategy == "accuracy_stability":
+        # 综合评分：0.6 * accuracy_normalized + 0.4 * (1 - std_normalized)
+        accs = [m.get('cv_accuracy', 0) for m in metadata.values()]
+        stds = [m.get('std', 0) for m in metadata.values()]
+
+        if not accs:
+            return list(metadata.keys())[:num_layers_to_select]
+
+        max_acc, min_acc = max(accs), min(accs)
+        max_std, min_std = max(stds) if stds else 1, min(stds) if stds else 0
+
+        scores = {}
+        for layer_idx, meta in metadata.items():
+            acc_norm = (meta.get('cv_accuracy', 0) - min_acc) / (max_acc - min_acc + 1e-10)
+            std_norm = (meta.get('std', 0) - min_std) / (max_std - min_std + 1e-10)
+            scores[layer_idx] = 0.6 * acc_norm + 0.4 * (1 - std_norm)
+
+        sorted_layers = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return [l for l, _ in sorted_layers[:num_layers_to_select]]
+
+    elif strategy == "layer_coverage":
+        # 跨层分布选择：S级(27-32)、A级(21-26)、B级(10-20) 各选一些
+        groups = {
+            'S': [l for l in metadata.keys() if l >= 27],
+            'A': [l for l in metadata.keys() if 21 <= l <= 26],
+            'B': [l for l in metadata.keys() if 10 <= l <= 20],
+            'C': [l for l in metadata.keys() if l < 10],
+        }
+
+        selected = []
+        per_group = max(1, num_layers_to_select // len([g for g, ls in groups.items() if ls]))
+
+        for group_name in ['S', 'A', 'B', 'C']:
+            group_layers = groups.get(group_name, [])
+            if not group_layers:
+                continue
+            # 每组按准确率排序
+            sorted_group = sorted(group_layers,
+                                 key=lambda l: metadata[l].get('cv_accuracy', 0),
+                                 reverse=True)
+            selected.extend(sorted_group[:per_group])
+            if len(selected) >= num_layers_to_select:
+                break
+
+        return selected[:num_layers_to_select]
+
+    else:
+        return list(metadata.keys())[:num_layers_to_select]
 
 
 def _get_transformer_layers(model: nn.Module):
@@ -22,6 +297,33 @@ def _get_transformer_layers(model: nn.Module):
     if hasattr(model, "layers"):
         return model.layers
     return None
+
+
+def _remap_toxic_vectors_to_hf_layer_index(
+    layer_toxic_vectors: Dict[int, np.ndarray],
+    num_model_layers: int,
+) -> Dict[int, np.ndarray]:
+    """
+    extract_toxic_vectors.py 从子目录 layer01..layer32 解析出的层号为 1..N，
+    而 HuggingFace CausalLM 的 decoder 层索引为 0..N-1。
+    若检测到「连续 1..num_model_layers」，则转为 0..num_model_layers-1，避免只对齐到 31 层。
+    """
+    if num_model_layers <= 0 or not layer_toxic_vectors:
+        return layer_toxic_vectors
+    keys = sorted(layer_toxic_vectors.keys())
+    k_min, k_max = keys[0], keys[-1]
+    if (
+        k_min == 1
+        and k_max == num_model_layers
+        and len(keys) == num_model_layers
+        and keys == list(range(1, num_model_layers + 1))
+    ):
+        print(
+            "[Parameter Alignment] 毒性向量层号为 1-based（与 layer01.. 文件夹一致），"
+            "已映射为 HF 的 0-based 层索引"
+        )
+        return {k - 1: layer_toxic_vectors[k] for k in keys}
+    return layer_toxic_vectors
 
 
 def _get_up_proj(layer: nn.Module) -> Optional[nn.Module]:
@@ -210,9 +512,13 @@ def _safe_get_weight_numpy(weight: torch.Tensor) -> Optional[np.ndarray]:
 
 def compute_parameter_alignment(
     model: nn.Module,
-    toxic_vectors_path: str,
+    toxic_vectors: Union[str, Path, Dict[int, np.ndarray], None] = None,
     target_neurons: Optional[Dict[Tuple[int, int], Dict]] = None,
     projection_method: str = "up_proj_transpose",
+    prefer_layer: Optional[int] = None,
+    probe_output_dir: Optional[Union[str, Path]] = None,
+    # 兼容旧调用方的别名参数名
+    toxic_vectors_path: Union[str, Path, None] = None,
 ) -> Dict[Tuple[int, int], Dict]:
     """
     计算参数对齐（S_i^k）：计算每个目标神经元的W_down行向量与毒性向量w_toxic的余弦相似度
@@ -228,12 +534,17 @@ def compute_parameter_alignment(
         - S_i^k > 0 (S+): 参数对齐为正，表示神经元参数方向促进有害内容生成
         - S_i^k < 0 (S-): 参数对齐为负，表示神经元参数方向有助于防御性转向
     
+    增强功能（支持三种毒性向量输入方式）：
+    1. 直接传入 Dict[int, np.ndarray]：预加载的毒性向量
+    2. 传入探针输出目录路径：自动从 outputs/linear_probes/ 加载
+    3. 传入 .npz 文件路径：传统方式，加载指定文件
+    
     Args:
         model: 语言模型
-        toxic_vectors_path: 毒性向量文件路径（.npz格式）
-            文件应包含：
-                - 'vectors': (num_layers, hidden_dim) 所有层的毒性向量
-                - 'layer_indices': (num_layers,) 层索引数组
+        toxic_vectors: 毒性向量，支持三种输入：
+            - Dict[int, np.ndarray]: 预加载的毒性向量 {layer_idx: w_toxic_array}
+            - str/Path: 探针输出目录路径（如 "outputs"），自动从中加载
+            - .npz 文件路径：传统方式，加载指定文件
         target_neurons: 目标神经元集合，格式为 Dict[(layer_idx, neuron_idx), Dict]
             如果为None，则分析所有层的所有神经元
         projection_method: 投影方法，可选值：
@@ -242,6 +553,8 @@ def compute_parameter_alignment(
                 - 其转置将 intermediate_size -> hidden_dim，保持语义一致性
             - "truncate": 简单截取前 hidden_dim 个维度，快速但不准确
                 - 会丢失约 71% 的维度信息
+        prefer_layer: 优先使用的层（当 toxic_vectors 为目录路径时使用）
+        probe_output_dir: 探针输出目录（当 toxic_vectors 为目录路径时使用）
     
     Returns:
         Dict[(layer_idx, neuron_idx), {
@@ -249,43 +562,73 @@ def compute_parameter_alignment(
             'alignment_type': 'S+' | 'S-',  # 对齐类型：正对齐或负对齐
             'neuron_weight_norm': float,  # 神经元权重向量的L2范数
             'toxic_vector_norm': float,  # 毒性向量的L2范数
+            'toxic_layer': int,  # 使用的毒性向量所属层
+            'probe_cv_accuracy': float,  # 该层的探针 CV 准确率（如果有）
         }]
     """
-    print("[Parameter Alignment] 加载毒性向量...")
+    # ========================================================================
+    # 毒性向量加载（支持三种方式）
+    # ========================================================================
     
-    # 加载毒性向量
-    toxic_data = np.load(toxic_vectors_path, allow_pickle=True)
-    vectors = toxic_data['vectors']  # (num_layers, hidden_dim)
-    toxic_layer_indices = toxic_data['layer_indices']  # (num_layers,)
+    vectors_metadata = {}  # 用于存储探针元数据
+
+    # 兼容旧调用方使用的 toxic_vectors_path 别名
+    if toxic_vectors is None and toxic_vectors_path is not None:
+        toxic_vectors = toxic_vectors_path
     
-    print(f"[Parameter Alignment] 加载了 {len(toxic_layer_indices)} 层的毒性向量")
+    # 解析毒性向量输入
+    if isinstance(toxic_vectors, dict):
+        # 方式1：直接传入 Dict
+        layer_toxic_vectors = toxic_vectors
+        print(f"[Parameter Alignment] 使用预加载的 {len(layer_toxic_vectors)} 层毒性向量")
+    elif isinstance(toxic_vectors, (str, Path)):
+        vectors_path = Path(toxic_vectors)
+        
+        # 检查是否是文件还是目录
+        if vectors_path.is_file() and vectors_path.suffix == '.npz':
+            # 方式3：传统 .npz 文件
+            toxic_data = np.load(str(vectors_path), allow_pickle=True)
+            layer_toxic_vectors = {}
+            if 'vectors' in toxic_data and 'layer_indices' in toxic_data:
+                for idx, layer_idx in enumerate(toxic_data['layer_indices']):
+                    layer_toxic_vectors[int(layer_idx)] = toxic_data['vectors'][idx]
+            print(f"[Parameter Alignment] 从文件加载了 {len(layer_toxic_vectors)} 层毒性向量")
+        else:
+            # 方式2：探针输出目录
+            layer_toxic_vectors, vectors_metadata = load_toxic_vectors_for_parameter_alignment(
+                toxic_vectors, prefer_layer=prefer_layer
+            )
+    else:
+        raise ValueError(f"toxic_vectors 类型错误: {type(toxic_vectors)}")
     
-    # 获取模型层结构
+    if not layer_toxic_vectors:
+        raise ValueError("未能加载任何毒性向量")
+
+    # 获取模型层结构（须先于层号映射：与 HF 的 0-based 对齐）
     layers = _get_transformer_layers(model)
     if layers is None:
         raise ValueError("无法获取模型的层结构，请确保模型是Llama架构")
-    
+
+    layer_toxic_vectors = _remap_toxic_vectors_to_hf_layer_index(
+        layer_toxic_vectors, len(layers)
+    )
+
     # 构建层索引到毒性向量的映射
     layer_to_toxic_idx = {}
-    for idx, layer_idx in enumerate(toxic_layer_indices):
+    vectors_array_list = []
+    for idx, (layer_idx, vec) in enumerate(sorted(layer_toxic_vectors.items())):
         layer_to_toxic_idx[int(layer_idx)] = idx
-    
-    print("[Parameter Alignment] 计算参数对齐...")
-    parameter_alignment = {}
-    
-    # 如果指定了目标神经元，只分析这些神经元
-    if target_neurons is not None:
-        target_layers = set(layer_idx for layer_idx, _ in target_neurons.keys())
-        total_neurons = len(target_neurons)
-        print(f"[Parameter Alignment] 将分析 {total_neurons} 个目标神经元，分布在 {len(target_layers)} 层中")
-    else:
-        target_layers = None
-        total_neurons = None
-    
+        vectors_array_list.append(vec)
+
+    vectors = np.stack(vectors_array_list) if len(vectors_array_list) > 1 else np.array([vectors_array_list[0]])
+
+    print(f"[Parameter Alignment] 加载了 {len(layer_to_toxic_idx)} 层的毒性向量")
+
     # 遍历所有层
+    parameter_alignment = {}
     for layer_idx, layer in enumerate(layers):
-        # 如果指定了目标神经元，跳过不在目标中的层
-        if target_layers is not None and layer_idx not in target_layers:
+        # 如果指定了目标神经元，跳过不在目标神经元中的层
+        if target_neurons is not None and not any(k[0] == layer_idx for k in target_neurons):
             continue
         
         # 检查该层是否有毒性向量
@@ -364,40 +707,60 @@ def compute_parameter_alignment(
         
         weight_shape = weight_tensor.shape
         
+        # 获取 up_proj 用于动态推断 intermediate_size（处理展平权重需要）
+        up_proj_for_dim = None
+        _up_proj_intermediate_size = None
+        _up_proj_hidden_dim = None
+        try:
+            up_proj_for_dim = _get_up_proj(layer)
+            if up_proj_for_dim is not None and hasattr(up_proj_for_dim, 'weight') and up_proj_for_dim.weight is not None:
+                up_proj_shape = up_proj_for_dim.weight.shape
+                if len(up_proj_shape) == 2:
+                    _up_proj_intermediate_size = up_proj_shape[0]
+                    _up_proj_hidden_dim = up_proj_shape[1]
+        except Exception:
+            pass
+
         # 处理可能的展平情况（量化权重可能被展平）
         if len(weight_shape) == 1:
-            # 如果是一维，尝试根据已知的模型架构重新reshape
-            # 对于 Llama-3-8B: down_proj 应该是 (4096, 7168)
-            # 29360128 = 4096 * 7168，所以如果总元素数是这个，可以reshape
+            # 如果是一维，尝试根据 up_proj 推断的维度重新 reshape
             total_elements = weight_shape[0]
-            if total_elements == 29360128:  # 4096 * 7168
-                # 尝试reshape为 (4096, 7168)
-                try:
-                    weight_tensor = weight_tensor.reshape(4096, 7168)
-                    weight_shape = weight_tensor.shape
-                    print(f"[Parameter Alignment] 层 {layer_idx}: 检测到展平的量化权重，已重新reshape为 {weight_shape}")
-                except:
-                    print(f"[Parameter Alignment] 警告: 层 {layer_idx} 的 down_proj 权重是一维 ({weight_shape})，无法自动reshape，跳过该层")
+            if _up_proj_intermediate_size is not None and _up_proj_hidden_dim is not None:
+                expected_total = _up_proj_hidden_dim * _up_proj_intermediate_size
+                expected_shape = (_up_proj_hidden_dim, _up_proj_intermediate_size)
+                if total_elements == expected_total:
+                    try:
+                        weight_tensor = weight_tensor.reshape(_up_proj_hidden_dim, _up_proj_intermediate_size)
+                        weight_shape = weight_tensor.shape
+                        print(f"[Parameter Alignment] 层 {layer_idx}: 检测到展平的量化权重，已重新reshape为 {weight_shape}")
+                    except Exception:
+                        print(f"[Parameter Alignment] 警告: 层 {layer_idx} 的 down_proj 权重是一维 ({weight_shape})，无法reshape为 {expected_shape}，跳过该层")
+                        continue
+                else:
+                    print(f"[Parameter Alignment] 警告: 层 {layer_idx} 的 down_proj 权重是一维 ({weight_shape}，元素数={total_elements})，"
+                          f"与 up_proj 维度 ({expected_shape}，元素数={expected_total}) 不匹配，跳过该层")
                     continue
             else:
-                print(f"[Parameter Alignment] 警告: 层 {layer_idx} 的 down_proj 权重是一维 ({weight_shape})，跳过该层")
+                print(f"[Parameter Alignment] 警告: 层 {layer_idx} 的 down_proj 权重是一维 ({weight_shape})，且无法从 up_proj 推断维度，跳过该层")
                 continue
-        
+
         if len(weight_shape) != 2:
             print(f"[Parameter Alignment] 警告: 层 {layer_idx} 的 down_proj 权重形状异常: {weight_shape}，期望 2D 张量，跳过该层")
             continue
-        
-        # 处理错误的 reshape 情况：如果总元素数是 29360128，尝试 reshape 为 [4096, 7168]
-        # 29360128 = 4096 * 7168 (Llama-3-8B 的 down_proj 形状)
+
+        # 处理错误的 reshape 情况：如果总元素数与 up_proj 维度不符，尝试自动修复
         total_elements = weight_tensor.numel() if hasattr(weight_tensor, 'numel') else weight_shape[0] * weight_shape[1]
-        if total_elements == 29360128 and weight_shape != (4096, 7168):
-            try:
-                weight_tensor = weight_tensor.reshape(4096, 7168)
-                weight_shape = weight_tensor.shape
-                print(f"[Parameter Alignment] 层 {layer_idx}: 检测到错误的权重形状，已重新reshape为 {weight_shape}")
-            except Exception as e:
-                print(f"[Parameter Alignment] 警告: 层 {layer_idx} 无法reshape权重从 {weight_shape} 到 (4096, 7168): {e}，跳过该层")
-                continue
+        if _up_proj_hidden_dim is not None and _up_proj_intermediate_size is not None:
+            expected_total = _up_proj_hidden_dim * _up_proj_intermediate_size
+            expected_shape = (_up_proj_hidden_dim, _up_proj_intermediate_size)
+            if total_elements == expected_total and weight_shape != expected_shape:
+                try:
+                    weight_tensor = weight_tensor.reshape(_up_proj_hidden_dim, _up_proj_intermediate_size)
+                    weight_shape = weight_tensor.shape
+                    print(f"[Parameter Alignment] 层 {layer_idx}: 检测到错误的权重形状，已重新reshape为 {weight_shape}")
+                except Exception as e:
+                    print(f"[Parameter Alignment] 警告: 层 {layer_idx} 无法reshape权重从 {weight_shape} 到 {expected_shape}: {e}，跳过该层")
+                    continue
         
         # 获取维度信息（直接使用张量的形状）
         hidden_dim_from_weight = weight_shape[0]  # out_features
@@ -527,11 +890,16 @@ def compute_parameter_alignment(
             # 判断对齐方向
             alignment_type = 'S+' if cosine_sim > 0 else 'S-'
             
+            # 获取该层对应的探针元数据
+            probe_cv_acc = vectors_metadata.get(layer_idx, {}).get('cv_accuracy', 0.0) if vectors_metadata else 0.0
+            
             parameter_alignment[(layer_idx, neuron_idx)] = {
                 'cosine_similarity': float(cosine_sim),
                 'alignment_type': alignment_type,
                 'neuron_weight_norm': float(neuron_weight_norm),
                 'toxic_vector_norm': float(w_toxic_norm),
+                'toxic_layer': layer_idx,  # 使用的毒性向量所属层
+                'probe_cv_accuracy': probe_cv_acc,  # 该层的探针 CV 准确率（如果有）
             }
             neurons_processed += 1
             

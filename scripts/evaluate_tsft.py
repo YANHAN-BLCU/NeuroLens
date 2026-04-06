@@ -626,6 +626,7 @@ def main():
     guard_tokenizer = AutoTokenizer.from_pretrained(guard_tokenizer_path, trust_remote_code=True)
     if guard_tokenizer.pad_token is None:
         guard_tokenizer.pad_token = guard_tokenizer.eos_token
+    guard_tokenizer.padding_side = 'left'
     guard_model = AutoModelForCausalLM.from_pretrained(
         guard_tokenizer_path,
         torch_dtype=guard_dtype,
@@ -644,6 +645,7 @@ def main():
     baseline_tokenizer = AutoTokenizer.from_pretrained(args.baseline_model, trust_remote_code=True)
     if baseline_tokenizer.pad_token is None:
         baseline_tokenizer.pad_token = baseline_tokenizer.eos_token
+    baseline_tokenizer.padding_side = 'left'
     baseline_model = AutoModelForCausalLM.from_pretrained(
         args.baseline_model,
         torch_dtype=llm_dtype,
@@ -683,6 +685,7 @@ def main():
     finetuned_tokenizer = AutoTokenizer.from_pretrained(args.finetuned_model, trust_remote_code=True)
     if finetuned_tokenizer.pad_token is None:
         finetuned_tokenizer.pad_token = finetuned_tokenizer.eos_token
+    finetuned_tokenizer.padding_side = 'left'
     finetuned_model = AutoModelForCausalLM.from_pretrained(
         args.finetuned_model,
         torch_dtype=llm_dtype,

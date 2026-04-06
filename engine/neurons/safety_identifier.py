@@ -41,7 +41,9 @@
 
 import torch
 import torch.nn as nn
-from typing import Dict, Tuple, Optional
+import numpy as np
+from typing import Dict, Tuple, Optional, Union
+from pathlib import Path
 from transformers import AutoTokenizer
 from torch.utils.data import Dataset
 
@@ -49,6 +51,8 @@ from .snip_scorer import (
     compute_snip_scores,
     rank_and_annotate_snip_scores,
     select_top_percent_neurons,
+    load_probe_toxic_vectors_from_snip,
+    get_recommended_analysis_layers,
 )
 
 def default_safety_loss_fn(outputs, batch, model, device):
@@ -250,3 +254,198 @@ def get_dedicated_safety_neurons(
         )
     
     return dedicated
+
+
+# ============================================================================
+# 探针层质量辅助函数（新增）
+# ============================================================================
+
+def get_layer_weights_for_safety(
+    probe_output_dir: Union[str, Path] = "outputs",
+    model_id: Optional[str] = None,
+) -> Dict[int, float]:
+    """
+    根据探针训练结果计算每层的分析权重。
+    
+    权重基于层的 CV 准确率计算，用于在神经元安全评分时加权。
+    
+    Args:
+        probe_output_dir: 探针输出目录
+        model_id: 模型 ID
+    
+    Returns:
+        Dict[int, float]: 每层的权重 {layer_idx: weight}
+    """
+    layer_weights = {}
+    
+    try:
+        vectors_by_layer, _ = load_probe_toxic_vectors_from_snip(probe_output_dir, model_id)
+
+        if vectors_by_layer:
+            # 归一化准确率作为权重
+            accuracies = [info.get('cv_accuracy', 0) for info in vectors_by_layer.values()]
+            if accuracies:
+                max_acc = max(accuracies)
+                if max_acc > 0:
+                    for layer_idx, info in vectors_by_layer.items():
+                        acc = info.get('cv_accuracy', 0)
+                        # 使用准确率与最大值之比的平方根作为权重
+                        weight = np.sqrt(acc / max_acc) if acc > 0 else 0
+                        layer_weights[layer_idx] = weight
+    except Exception as e:
+        print(f"[Layer Weights] 警告: 无法计算层权重: {e}")
+    
+    if not layer_weights:
+        # 返回均匀权重
+        for i in range(32):
+            layer_weights[i] = 1.0
+    
+    return layer_weights
+
+
+def select_safety_neurons_by_layer_quality(
+    safety_neurons: Dict[Tuple[int, int], Dict],
+    layer_quality: Dict[int, Dict],
+    top_n_per_layer: int = 50,
+    min_cv_accuracy: float = 0.85,
+) -> Dict[Tuple[int, int], Dict]:
+    """
+    根据层质量选择高质量安全神经元。
+    
+    从探针训练结果中选择 CV 准确率高的层的神经元优先分析。
+    
+    Args:
+        safety_neurons: 安全神经元候选集
+        layer_quality: 层质量数据
+        top_n_per_layer: 每层最多选择的神经元数
+        min_cv_accuracy: 最低 CV 准确率阈值
+    
+    Returns:
+        Dict[Tuple[int, int], Dict]: 筛选后的安全神经元
+    """
+    if not layer_quality or not safety_neurons:
+        return safety_neurons
+    
+    # 过滤低质量层
+    high_quality_layers = {
+        layer_idx: info 
+        for layer_idx, info in layer_quality.items()
+        if info.get('cv_accuracy', 0) >= min_cv_accuracy
+    }
+    
+    if not high_quality_layers:
+        return safety_neurons
+    
+    # 按层质量排序
+    sorted_layers = sorted(
+        high_quality_layers.items(),
+        key=lambda x: x[1].get('cv_accuracy', 0),
+        reverse=True
+    )
+    
+    # 选择每层的前 top_n_per_layer 个神经元
+    selected_neurons = {}
+    
+    for layer_idx, _ in sorted_layers:
+        layer_neurons = [
+            (key, data) for key, data in safety_neurons.items()
+            if key[0] == layer_idx
+        ]
+        
+        # 按安全分数排序
+        sorted_neurons = sorted(
+            layer_neurons,
+            key=lambda x: x[1].get('score', 0),
+            reverse=True
+        )
+        
+        # 选择前 top_n_per_layer
+        for key, data in sorted_neurons[:top_n_per_layer]:
+            selected_neurons[key] = data
+    
+    # 如果选择太少，返回全部
+    if len(selected_neurons) < len(safety_neurons) * 0.1:
+        print(f"[Safety Neurons by Quality] 选择太少神经元 ({len(selected_neurons)})，返回全部 ({len(safety_neurons)})")
+        return safety_neurons
+    
+    print(f"[Safety Neurons by Quality] 从 {len(safety_neurons)} 中选择了 {len(selected_neurons)} 个高质量神经元")
+    return selected_neurons
+
+
+def identify_safety_neurons_with_probe_guidance(
+    model: nn.Module,
+    tokenizer: AutoTokenizer,
+    benign_dataset: Dataset,
+    device: torch.device,
+    probe_output_dir: Union[str, Path] = "outputs",
+    model_id: Optional[str] = None,
+    safety_threshold_q: float = 0.005,
+    batch_size: int = 8,
+    num_samples: Optional[int] = None,
+    loss_fn: Optional[callable] = None,
+    use_probe_guidance: bool = True,
+) -> Tuple[Dict[Tuple[int, int], Dict], Dict]:
+    """
+    基于探针指导的安全神经元识别。
+    
+    在 identify_safety_neurons 的基础上，增加探针层质量指导：
+    - 根据探针 CV 准确率选择优先分析的层
+    - 根据层质量加权神经元安全分数
+    
+    Args:
+        model: 语言模型
+        tokenizer: 分词器
+        benign_dataset: Benign 参考数据集
+        device: 设备
+        probe_output_dir: 探针输出目录
+        model_id: 模型 ID
+        safety_threshold_q: 安全阈值 q
+        batch_size: 批大小
+        num_samples: 样本数限制
+        loss_fn: 自定义损失函数
+        use_probe_guidance: 是否使用探针指导（优先分析高质量层）
+    
+    Returns:
+        Tuple[Dict, Dict]: (安全神经元集合, 探针元数据)
+    """
+    # 获取推荐的分析层
+    recommendations = get_recommended_analysis_layers(
+        probe_output_dir, model_id
+    )
+    
+    print(f"[Safety with Probe Guidance] 推荐分析层: {recommendations}")
+    
+    # 加载探针元数据
+    layer_quality = {}
+    try:
+        vectors_by_layer, _ = load_probe_toxic_vectors_from_snip(probe_output_dir, model_id)
+        for layer_idx, info in vectors_by_layer.items():
+            layer_quality[layer_idx] = {
+                'cv_accuracy': info.get('cv_accuracy', 0),
+                'std': info.get('std', 0),
+            }
+    except Exception as e:
+        print(f"[Safety with Probe Guidance] 警告: 无法加载探针数据: {e}")
+    
+    # 基础安全神经元识别
+    safety_neurons = identify_safety_neurons(
+        model=model,
+        tokenizer=tokenizer,
+        benign_dataset=benign_dataset,
+        device=device,
+        safety_threshold_q=safety_threshold_q,
+        batch_size=batch_size,
+        num_samples=num_samples,
+        loss_fn=loss_fn,
+    )
+    
+    # 如果启用探针指导，根据层质量筛选
+    if use_probe_guidance and layer_quality:
+        safety_neurons = select_safety_neurons_by_layer_quality(
+            safety_neurons,
+            layer_quality,
+            top_n_per_layer=50,
+            min_cv_accuracy=0.85,
+        )
+    
+    return safety_neurons, {'recommendations': recommendations, 'layer_quality': layer_quality}

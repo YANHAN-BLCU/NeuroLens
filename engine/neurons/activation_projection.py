@@ -7,17 +7,258 @@
 - 收集jailbreak样本在目标神经元上的激活值
 - 将激活值投影到毒性向量上
 - 分别统计成功和失败jailbreak样本的激活分布
+- 支持从训练好的探针加载毒性向量（enhanced 模式）
 """
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Tuple, Optional, List, Callable
+import json
+from typing import Dict, Tuple, Optional, List, Callable, Union
+from pathlib import Path
 from transformers import AutoTokenizer
 from torch.utils.data import Dataset, DataLoader
 from collections import defaultdict
 from tqdm import tqdm
+
+
+# ============================================================================
+# 探针毒性向量加载器（支持多种输出格式）
+# ============================================================================
+
+def load_toxic_vectors_from_probes(
+    probe_output_dir: Union[str, Path] = "outputs",
+    prefer_layer: Optional[int] = None,
+) -> Tuple[Dict[int, np.ndarray], Dict[int, Dict]]:
+    """
+    从探针训练输出加载毒性向量。
+
+    支持多种数据格式：
+    1. outputs/linear_probes/layers/layerXX/layerXX.pt  +  metrics.json
+       （scripts/train_linear_probe_labels.py 输出格式）
+    2. outputs/toxicity_vectors/all_layers_toxicity_vectors.json
+       （scripts/extract_toxicity_vectors.py 聚合格式）
+    3. outputs/toxicity_vectors/layer_toxicity_summary.json
+       （仅含统计，不含向量）
+
+    Args:
+        probe_output_dir: 探针输出目录
+        prefer_layer: 优先使用的层（默认为 None，自动选择）
+
+    Returns:
+        Tuple[Dict, Dict]:
+            - vectors: {layer_idx: w_toxic_array}
+            - metadata: {layer_idx: {cv_accuracy, std, b, ...}}
+    """
+    import re as re_module
+    probe_output_dir = Path(probe_output_dir)
+    vectors = {}
+    metadata = {}
+
+    def _get_layer_idx(name: str) -> Optional[int]:
+        match = re_module.match(r'layer_(\d+)', name)
+        if match:
+            return int(match.group(1))
+        match = re_module.match(r'layer(\d+)', name)
+        if match:
+            return int(match.group(1))
+        return None
+
+    # 收集所有 layer 目录（包括 linear_probes/layers/ 子目录）
+    layer_dirs = []
+
+    # 策略1: linear_probes/layers/ 目录
+    layers_dir = probe_output_dir / "linear_probes" / "layers"
+    if layers_dir.exists():
+        for layer_folder in sorted(layers_dir.iterdir()):
+            if layer_folder.is_dir() and _get_layer_idx(layer_folder.name) is not None:
+                layer_dirs.append(layer_folder)
+
+    # 策略2: 直接格式（layerXX/ 或 layer_XX/）
+    for item in sorted(probe_output_dir.iterdir()):
+        if item.is_dir() and _get_layer_idx(item.name) is not None:
+            if not any(d.name == item.name for d in layer_dirs):
+                layer_dirs.append(item)
+
+    # 策略3: 从 outputs/toxicity_vectors/ 加载
+    toxicity_dir = probe_output_dir / "toxicity_vectors"
+    if toxicity_dir.exists():
+        all_vectors_path = toxicity_dir / "all_layers_toxicity_vectors.json"
+        if all_vectors_path.exists():
+            try:
+                with open(all_vectors_path, 'r', encoding='utf-8') as f:
+                    all_data = json.load(f)
+
+                if 'layers' in all_data:
+                    for layer_key, layer_data in all_data['layers'].items():
+                        layer_idx = int(layer_key)
+                        if 'w_toxic' in layer_data:
+                            vectors[layer_idx] = np.array(layer_data['w_toxic'])
+                        elif 'vector' in layer_data:
+                            vectors[layer_idx] = np.array(layer_data['vector'])
+                        metadata[layer_idx] = {
+                            'cv_accuracy': float(layer_data.get('cv_accuracy', 0)),
+                            'l2_norm': float(layer_data.get('vector_l2_norm', 0)),
+                            'safe_acc': float(layer_data.get('cv_safe_acc', 0)),
+                            'harm_acc': float(layer_data.get('cv_harmful_acc', 0)),
+                        }
+            except Exception:
+                pass
+
+        # layer_toxicity_summary.json 仅含统计，不含向量
+        if not vectors:
+            summary_path = toxicity_dir / "layer_toxicity_summary.json"
+            if summary_path.exists():
+                try:
+                    with open(summary_path, 'r', encoding='utf-8') as f:
+                        summary = json.load(f)
+                    if 'layers_summary' in summary:
+                        for layer_info in summary['layers_summary']:
+                            layer_idx = int(layer_info['layer'])
+                            metadata[layer_idx] = {
+                                'cv_accuracy': float(layer_info.get('cv_accuracy', 0)),
+                                'l2_norm': float(layer_info.get('l2_norm', 0)),
+                            }
+                except Exception:
+                    pass
+
+    # 策略4: 从 linear_probes/layers/layerXX/ 加载（补充向量和 metrics）
+    for layer_folder in layer_dirs:
+        layer_idx = _get_layer_idx(layer_folder.name)
+        if layer_idx is None or layer_idx in vectors:
+            continue
+
+        meta = {}
+
+        # 从 layerXX.pt 加载毒性向量（主要来源）
+        for pt_name in [f"{layer_folder.name}.pt", "probe.pt", "best.pt"]:
+            pt_path = layer_folder / pt_name
+            if not pt_path.exists():
+                continue
+            try:
+                checkpoint = torch.load(pt_path, map_location='cpu', weights_only=False)
+                if 'toxicity_vector' in checkpoint:
+                    tv = checkpoint['toxicity_vector']
+                    vectors[layer_idx] = np.array(tv) if not isinstance(tv, np.ndarray) else tv
+                elif 'linear.weight' in checkpoint:
+                    w = checkpoint['linear.weight']
+                    if w.shape[0] == 2:
+                        w_arr = w.cpu().numpy() if hasattr(w, 'cpu') else np.array(w)
+                        vectors[layer_idx] = w_arr[1] - w_arr[0]
+                elif 'fc.weight' in checkpoint:
+                    w = checkpoint['fc.weight']
+                    if w.shape[0] == 2:
+                        w_arr = w.cpu().numpy() if hasattr(w, 'cpu') else np.array(w)
+                        vectors[layer_idx] = w_arr[1] - w_arr[0]
+                elif 'weight' in checkpoint:
+                    w = checkpoint['weight']
+                    if hasattr(w, 'shape') and w.shape[0] == 2:
+                        w_arr = w.cpu().numpy() if hasattr(w, 'cpu') else np.array(w)
+                        vectors[layer_idx] = w_arr[1] - w_arr[0]
+                break
+            except Exception:
+                continue
+
+        # 加载 metrics.json（支持嵌套 avg_metrics 格式）
+        metrics_json = layer_folder / "metrics.json"
+        if metrics_json.exists():
+            try:
+                with open(metrics_json, 'r', encoding='utf-8') as f:
+                    metrics = json.load(f)
+
+                # 新格式：val_acc（顶层字段）
+                if 'val_acc' in metrics:
+                    meta['cv_accuracy'] = float(metrics['val_acc'])
+                # 旧格式：avg_metrics.avg_val_acc
+                elif 'avg_metrics' in metrics and 'avg_val_acc' in metrics['avg_metrics']:
+                    meta['cv_accuracy'] = float(metrics['avg_metrics']['avg_val_acc'])
+
+                # 标准差
+                if 'std_val_acc' in metrics:
+                    meta['std'] = float(metrics['std_val_acc'])
+                elif 'avg_metrics' in metrics and 'std_val_acc' in metrics['avg_metrics']:
+                    meta['std'] = float(metrics['avg_metrics']['std_val_acc'])
+
+                # 旧格式安全/有害准确率
+                if 'avg_metrics' in metrics:
+                    if 'avg_val_s_acc' in metrics['avg_metrics']:
+                        meta['safe_acc'] = float(metrics['avg_metrics']['avg_val_s_acc'])
+                    if 'avg_val_h_acc' in metrics['avg_metrics']:
+                        meta['harm_acc'] = float(metrics['avg_metrics']['avg_val_h_acc'])
+
+                # 新格式额外指标
+                if 'val_roc_auc' in metrics:
+                    meta['val_roc_auc'] = float(metrics['val_roc_auc'])
+                if 'val_pr_auc' in metrics:
+                    meta['val_pr_auc'] = float(metrics['val_pr_auc'])
+
+            except Exception:
+                pass
+
+        if layer_idx in vectors or meta:
+            metadata[layer_idx] = meta
+
+    if not vectors:
+        print(f"[Toxic Vectors] 警告: 未能从 {probe_output_dir} 加载毒性向量")
+
+    print(f"[Toxic Vectors] 加载了 {len(vectors)} 层的毒性向量")
+
+    # 自动选择最佳层
+    if prefer_layer is None and metadata:
+        valid_meta = {k: v for k, v in metadata.items() if k in vectors}
+        if valid_meta:
+            best_layer = max(valid_meta.items(),
+                           key=lambda x: x[1].get('cv_accuracy', 0))[0]
+            print(f"[Toxic Vectors] 自动选择最佳层: Layer {best_layer}")
+
+    return vectors, metadata
+
+
+def get_best_toxic_vector_for_activation(
+    probe_output_dir: Union[str, Path] = "outputs",
+    prefer_layer: Optional[int] = None,
+    target_layers: Optional[List[int]] = None,
+) -> Tuple[Optional[np.ndarray], Optional[int], Dict]:
+    """
+    获取最佳毒性向量用于激活投影分析。
+    
+    Args:
+        probe_output_dir: 探针输出目录
+        prefer_layer: 优先使用的层
+        target_layers: 目标层列表（如果提供，返回这些层的平均毒性向量）
+    
+    Returns:
+        Tuple: (w_toxic, layer_idx, metadata)
+    """
+    vectors, metadata = load_toxic_vectors_from_probes(probe_output_dir, prefer_layer=prefer_layer)
+
+    if not vectors:
+        return None, None, {}
+
+    # 如果指定了目标层，计算平均毒性向量
+    if target_layers:
+        valid_layers = [l for l in target_layers if l in vectors]
+        if valid_layers:
+            avg_vector = np.mean([vectors[l] for l in valid_layers], axis=0)
+            avg_metadata = {
+                'layer': f"{min(valid_layers)}-{max(valid_layers)}",
+                'num_layers': len(valid_layers),
+                'cv_accuracy': np.mean([metadata.get(l, {}).get('cv_accuracy', 0) for l in valid_layers]),
+            }
+            return avg_vector, valid_layers[0], avg_metadata
+
+    # 使用指定层或最佳层
+    if prefer_layer is not None and prefer_layer in vectors:
+        return vectors[prefer_layer], prefer_layer, metadata.get(prefer_layer, {})
+
+    # 选择 CV 准确率最高的层
+    valid_meta = {k: v for k, v in metadata.items() if k in vectors}
+    if valid_meta:
+        best_layer = max(valid_meta.items(), key=lambda x: x[1].get('cv_accuracy', 0))[0]
+        return vectors[best_layer], best_layer, metadata.get(best_layer, {})
+
+    return None, None, {}
 
 
 def _get_transformer_layers(model: nn.Module):
@@ -27,6 +268,33 @@ def _get_transformer_layers(model: nn.Module):
     if hasattr(model, "layers"):
         return model.layers
     return None
+
+
+def _remap_toxic_vectors_to_hf_layer_index(
+    layer_vectors: Dict[int, np.ndarray],
+    num_model_layers: int,
+) -> Dict[int, np.ndarray]:
+    """
+    extract_toxic_vectors.py 从子目录 layer01..layer32 解析出的层号为 1..N，
+    而 HuggingFace CausalLM 的 decoder 层索引为 0..N-1。
+    若检测到「连续 1..num_model_layers」，则转为 0..num_model_layers-1。
+    """
+    if num_model_layers <= 0 or not layer_vectors:
+        return layer_vectors
+    keys = sorted(layer_vectors.keys())
+    k_min, k_max = keys[0], keys[-1]
+    if (
+        k_min == 1
+        and k_max == num_model_layers
+        and len(keys) == num_model_layers
+        and keys == list(range(1, num_model_layers + 1))
+    ):
+        print(
+            "[激活投影] 毒性向量层号为 1-based（与 layer01.. 文件夹一致），"
+            "已映射为 HF 的 0-based 层索引"
+        )
+        return {k - 1: layer_vectors[k] for k in keys}
+    return layer_vectors
 
 
 def _get_mlp_module(layer: nn.Module) -> Optional[nn.Module]:
@@ -96,12 +364,14 @@ def compute_activation_projection(
     model: nn.Module,
     tokenizer: AutoTokenizer,
     dataset: Dataset,
-    toxic_vectors_path: str,
+    toxic_vectors: Union[str, Path, Dict[int, np.ndarray]],
     target_neurons: Optional[Dict[Tuple[int, int], Dict]],
     device: torch.device,
     batch_size: int = 8,
     max_length: int = 2048,
     num_samples: Optional[int] = None,
+    prefer_layer: Optional[int] = None,
+    probe_output_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[Tuple[int, int], Dict]:
     """
     计算激活投影（A_i^k）：分析神经元在jailbreak样本中的激活模式
@@ -120,6 +390,11 @@ def compute_activation_projection(
     
     本函数分别统计成功和失败jailbreak样本的激活投影分布。
     
+    增强功能（支持三种毒性向量输入方式）：
+    1. 直接传入 Dict[int, np.ndarray]：预加载的毒性向量
+    2. 传入探针输出目录路径：自动从 outputs/linear_probes/ 加载
+    3. 传入 .npz 文件路径：传统方式，加载指定文件
+    
     Args:
         model: 语言模型
         tokenizer: 分词器
@@ -127,13 +402,18 @@ def compute_activation_projection(
             每个样本应包含：
                 - 文本字段（'text'、'prompt'或'input'）
                 - jailbreak成功标志（'jailbreak_success'、'asr_label'或'success'）
-        toxic_vectors_path: 毒性向量文件路径（.npz格式）
+        toxic_vectors: 毒性向量，支持三种输入：
+            - Dict[int, np.ndarray]: 预加载的毒性向量 {layer_idx: w_toxic_array}
+            - str/Path: 探针输出目录路径（如 "outputs"），自动从中加载
+            - .npz 文件路径：传统方式，加载指定文件
         target_neurons: 目标神经元集合，格式为 Dict[(layer_idx, neuron_idx), Dict]
         device: 计算设备
         batch_size: 批大小
         max_length: tokenization最大长度
         num_samples: 使用的样本数限制（None表示全部）
             注意：会分别限制成功和失败样本的数量，确保两种类型的样本都能被充分分析
+        prefer_layer: 优先使用的层（默认为 None，自动选择最佳层）
+        probe_output_dir: 探针输出目录（当 toxic_vectors 为目录路径时使用）
     
     Returns:
         Dict[(layer_idx, neuron_idx), {
@@ -145,17 +425,58 @@ def compute_activation_projection(
             'failed_count': int,  # 失败样本数量
             'activation_projection': float,  # 激活投影值（用于象限分类，通常使用成功样本的平均值）
             'activation_diff': float,  # 成功-失败的平均差异（辅助信息）
+            'toxic_layer': int,  # 使用的毒性向量所属层
+            'probe_cv_accuracy': float,  # 该层的探针 CV 准确率（如果有）
         }]
     """
-    # 加载毒性向量
-    toxic_data = np.load(toxic_vectors_path, allow_pickle=True)
-    vectors = toxic_data['vectors']  # (num_layers, hidden_dim)
-    toxic_layer_indices = toxic_data['layer_indices']  # (num_layers,)
+    # ========================================================================
+    # 毒性向量加载（支持三种方式）
+    # ========================================================================
     
+    # 解析毒性向量输入
+    if isinstance(toxic_vectors, dict):
+        # 方式1：直接传入 Dict
+        layer_vectors, vectors_metadata = toxic_vectors, {}
+        print(f"[激活投影] 使用预加载的 {len(layer_vectors)} 层毒性向量")
+    elif isinstance(toxic_vectors, (str, Path)):
+        vectors_path = Path(toxic_vectors)
+        
+        # 检查是否是文件还是目录
+        if vectors_path.is_file() and vectors_path.suffix == '.npz':
+            # 方式3：传统 .npz 文件
+            toxic_data = np.load(str(vectors_path), allow_pickle=True)
+            layer_vectors = {}
+            if 'vectors' in toxic_data and 'layer_indices' in toxic_data:
+                for idx, layer_idx in enumerate(toxic_data['layer_indices']):
+                    layer_vectors[int(layer_idx)] = toxic_data['vectors'][idx]
+            vectors_metadata = {}
+            print(f"[激活投影] 从文件加载了 {len(layer_vectors)} 层毒性向量")
+        else:
+            # 方式2：探针输出目录
+            layer_vectors, vectors_metadata = load_toxic_vectors_from_probes(
+                vectors_path, prefer_layer=prefer_layer
+            )
+    else:
+        raise ValueError(f"toxic_vectors 类型错误: {type(toxic_vectors)}")
+    
+    if not layer_vectors:
+        raise ValueError("未能加载任何毒性向量")
+
+    # 获取模型层数后，将 1-based 层号映射为 HF 的 0-based 索引
+    layers = _get_transformer_layers(model)
+    if layers is not None:
+        layer_vectors = _remap_toxic_vectors_to_hf_layer_index(
+            layer_vectors, len(layers)
+        )
+
     # 构建层索引到毒性向量的映射
     layer_to_toxic_idx = {}
-    for idx, layer_idx in enumerate(toxic_layer_indices):
+    vectors_array_list = []
+    for idx, (layer_idx, vec) in enumerate(sorted(layer_vectors.items())):
         layer_to_toxic_idx[int(layer_idx)] = idx
+        vectors_array_list.append(vec)
+    
+    vectors = np.stack(vectors_array_list) if len(vectors_array_list) > 1 else np.array([vectors_array_list[0]])
     
     # ========================================================================
     # 分离成功和失败的样本（根据论文5.4节要求）
@@ -289,11 +610,19 @@ def compute_activation_projection(
     
     # 计算统计量
     results = {}
-    
+
     # 确保 target_neurons 不为 None
     if target_neurons is None:
         raise ValueError("target_neurons 不能为 None，应该在函数开始时自动生成")
-    
+
+    # 预先检查：哪些层的目标神经元没有对应的毒性向量
+    missing_layers = {
+        layer_idx for (layer_idx, _) in target_neurons.keys()
+        if layer_idx not in layer_to_toxic_idx
+    }
+    if missing_layers:
+        print(f"[激活投影] 警告: 以下层的目标神经元没有对应的毒性向量，将被跳过: {sorted(missing_layers)}")
+
     for (layer_idx, neuron_idx) in target_neurons.keys():
         if layer_idx not in layer_to_toxic_idx:
             continue
@@ -307,6 +636,10 @@ def compute_activation_projection(
         successful_mean = float(np.mean(successful_projs)) if successful_projs else 0.0
         failed_mean = float(np.mean(failed_projs)) if failed_projs else 0.0
         
+        # 获取该层对应的探针元数据
+        toxic_layer = layer_idx
+        probe_cv_acc = vectors_metadata.get(layer_idx, {}).get('cv_accuracy', 0.0) if vectors_metadata else 0.0
+        
         results[(layer_idx, neuron_idx)] = {
             'successful_mean': successful_mean,
             'failed_mean': failed_mean,
@@ -317,6 +650,8 @@ def compute_activation_projection(
             'activation_projection': successful_mean,  # 用于象限分类的激活投影值（使用成功样本的平均值）
             'activation_diff': float(successful_mean - failed_mean) 
                 if (successful_projs and failed_projs) else 0.0,
+            'toxic_layer': toxic_layer,  # 使用的毒性向量所属层
+            'probe_cv_accuracy': probe_cv_acc,  # 该层的探针 CV 准确率（如果有）
         }
     
     print(f"[激活投影] 完成: {len(results)} 个神经元")
@@ -728,13 +1063,11 @@ def _process_samples(
                 # 将 up_proj 权重移动到正确的设备
                 up_proj_weight = up_proj_weight_tensor.to(device)
                 
-                # 使用 up_proj 的转置进行投影：a_down = intermediate @ up_proj^T
-                # up_proj: (intermediate_size, hidden_dim)
-                # up_proj^T: (hidden_dim, intermediate_size)
-                # intermediate: (batch_size, intermediate_size)
-                # a_down: (batch_size, hidden_dim)
-                # 注意：使用 up_proj^T 投影到 hidden_dim 空间，与参数对齐方法一致
-                a_down = torch.matmul(last_token_intermediate, up_proj_weight.t())  # (batch_size, hidden_dim)
+                # 使用 up_proj 进行投影：a_down = intermediate @ up_proj
+                # up_proj: (intermediate_size, hidden_dim) = (14336, 4096)
+                # intermediate: (batch_size, intermediate_size) = (batch_size, 14336)
+                # a_down: (batch_size, hidden_dim) = (batch_size, 4096)
+                a_down = torch.matmul(last_token_intermediate, up_proj_weight)  # (batch_size, hidden_dim)
                 
                 # 对于每个目标神经元，计算激活投影
                 for (target_layer_idx, neuron_idx) in target_neurons.keys():

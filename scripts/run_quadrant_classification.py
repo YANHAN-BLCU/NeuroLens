@@ -71,6 +71,36 @@ from engine.neurons.quadrant_classification import (
 )
 
 
+def _log_to_guard_label(
+    script_name: str,
+    status: str,
+    message: str,
+    details: dict = None,
+) -> None:
+    """向 logs/guard_label.log 追加一条结构化运行记录（JSONL 格式）。"""
+    import datetime
+    import json as _json
+
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "guard_label.log"
+
+    entry = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "script": script_name,
+        "status": status,
+        "message": message,
+    }
+    if details:
+        entry["details"] = details
+
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(_json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def load_json_to_dict(json_path: str, data_type: str = "unknown") -> Dict[Tuple[int, int], Dict]:
     """
     从JSON文件中加载数据并转换为元组键格式
@@ -250,7 +280,19 @@ def main():
     )
     
     args = parser.parse_args()
-    
+
+    _log_to_guard_label(
+        "run_quadrant_classification",
+        "START",
+        f"四象限分类启动 — threshold_s={args.threshold_s}, threshold_a={args.threshold_a}",
+        details={
+            "parameter_alignment_path": args.parameter_alignment_path,
+            "activation_projection_path": args.activation_projection_path,
+            "threshold_s": args.threshold_s,
+            "threshold_a": args.threshold_a,
+        },
+    )
+
     # 加载数据
     print("[Quadrant Classification] 开始加载数据...")
     parameter_alignment = load_json_to_dict(
@@ -309,9 +351,29 @@ def main():
     
     print(f"\n[Quadrant Classification] 完成！结果已保存到: {output_file}")
     print(f"[Quadrant Classification] 共分类 {len(quadrant_results)} 个神经元")
-    
+
+    _log_to_guard_label(
+        "run_quadrant_classification",
+        "DONE",
+        f"四象限分类完成 — 神经元数={len(quadrant_results)}, 输出={output_file}",
+        details={
+            "num_neurons": len(quadrant_results),
+            "output_path": str(output_file),
+            "quadrant_counts": stats,
+        },
+    )
+
     return 0
 
 
 if __name__ == '__main__':
-    exit(main())
+    try:
+        exit(main())
+    except Exception as e:
+        _log_to_guard_label(
+            "run_quadrant_classification",
+            "ERROR",
+            f"运行异常: {e}",
+            details={"exception": str(e)},
+        )
+        raise

@@ -3,14 +3,388 @@ SNIP 分数计算模块
 
 基于 SNIP (Single-shot Network Pruning based on Connection Sensitivity) 方法
 计算每个神经元对损失的贡献度
+
+增强功能：
+- 支持从训练好的线性探针加载毒性向量（w_toxic）用于增强安全评估
+- 基于探针的 CV 准确率和层级稳定性推荐最佳分析层
+- 兼容新旧探针输出格式（layer_XX/probe.pt vs layerXX/layerXX.pt）
 """
 
+import json
 import torch
 import torch.nn as nn
-from typing import Dict, Tuple, Optional, Callable, Iterable, Literal
+import numpy as np
+from typing import Dict, Tuple, Optional, Callable, Iterable, Literal, Union
+from pathlib import Path
 from collections import defaultdict
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader, Dataset
+
+# ============================================================================
+# 探针毒性向量加载器
+# ============================================================================
+
+def _get_layer_idx(name: str):
+    """从目录名提取层索引（layer_XX 或 layerXX 格式）。"""
+    import re
+    match = re.match(r'layer_(\d+)', name)
+    if match:
+        return int(match.group(1))
+    match = re.match(r'layer(\d+)', name)
+    if match:
+        return int(match.group(1))
+    return None
+
+def load_probe_toxic_vectors_from_snip(
+    probe_output_dir: Union[str, Path],
+    model_id: Optional[str] = None,
+    prefer_layer: Optional[int] = None,
+) -> Tuple[Dict[int, Dict], Dict[int, Dict]]:
+    """
+    从训练好的探针输出目录加载各层的毒性向量。
+
+    返回值格式（Tuple）：
+        - vectors: {layer_idx: {'w_toxic': np.ndarray, 'cv_accuracy': float, 'std': float, ...}}
+        - metadata: {layer_idx: {'cv_accuracy': float, 'std': float, ...}}
+                  （旧格式中 vectors 和 metadata 内容相同，统一用 vectors 填充 metadata）
+
+    支持的探针目录结构：
+    1. outputs/linear_probes/layers/layerXX/layerXX.pt + metrics.json
+       （scripts/train_linear_probe_labels.py 输出格式）
+    2. outputs/toxicity_vectors/all_layers_toxicity_vectors.json
+       （scripts/extract_toxicity_vectors.py 聚合格式）
+    3. outputs/probes/model_id/layer_XX/probe.pt
+       （engine/probes/linear_probe_balanced.py 输出格式）
+
+    Args:
+        probe_output_dir: 探针输出目录
+        model_id: 模型 ID（用于构建探针子目录路径）
+        prefer_layer: 优先使用的层
+
+    Returns:
+        Tuple[Dict, Dict]: (vectors, metadata)
+    """
+    probe_output_dir = Path(probe_output_dir)
+
+    # 按优先级收集所有 layer 目录（去重）
+    layer_dirs = []
+
+    # 1. 新格式 probes/model_id/layer_XX/
+    probes_dir = probe_output_dir / "probes"
+    if probes_dir.exists():
+        for model_folder in sorted(probes_dir.iterdir()):
+            if not model_folder.is_dir():
+                continue
+            for layer_folder in sorted(model_folder.iterdir()):
+                if layer_folder.is_dir():
+                    layer_dirs.append(layer_folder)
+
+    # 2. 旧格式 linear_probes/layers/layerXX/
+    old_style = probe_output_dir / "linear_probes" / "layers"
+    if old_style.exists():
+        for layer_folder in sorted(old_style.iterdir()):
+            if layer_folder.is_dir() and _get_layer_idx(layer_folder.name) is not None:
+                if not any(d.resolve() == layer_folder.resolve() for d in layer_dirs):
+                    layer_dirs.append(layer_folder)
+
+    # 3. 直接格式 layerXX/ 或 layer_XX/
+    for item in sorted(probe_output_dir.iterdir()):
+        if item.is_dir() and _get_layer_idx(item.name) is not None:
+            if not any(d.resolve() == item.resolve() for d in layer_dirs):
+                layer_dirs.append(item)
+
+    vectors_by_layer = {}
+
+    for layer_folder in layer_dirs:
+        layer_idx = _get_layer_idx(layer_folder.name)
+        if layer_idx is None or layer_idx in vectors_by_layer:
+            continue
+
+        name = layer_folder.name
+        layer_info = {}
+
+        # 方法1：toxic_vector.npz
+        toxic_npz = layer_folder / "toxic_vector.npz"
+        if toxic_npz.exists():
+            try:
+                data = np.load(toxic_npz, allow_pickle=True)
+                if 'w_toxic' in data:
+                    layer_info['w_toxic'] = data['w_toxic']
+                    layer_info['b'] = float(data.get('b', 0.0))
+                elif 'w_toxic_normalized' in data:
+                    layer_info['w_toxic'] = data['w_toxic_normalized']
+                    layer_info['b'] = float(data.get('b', 0.0))
+            except Exception:
+                pass
+
+        # 方法2：从 probe.pt / layerXX.pt / best.pt 提取毒性向量
+        if 'w_toxic' not in layer_info:
+            for pt_file in ['probe.pt', f'{name}.pt', 'best.pt']:
+                pt_path = layer_folder / pt_file
+                if not pt_path.exists():
+                    continue
+                try:
+                    checkpoint = torch.load(pt_path, map_location='cpu', weights_only=False)
+                    if 'toxicity_vector' in checkpoint:
+                        tv = checkpoint['toxicity_vector']
+                        layer_info['w_toxic'] = np.array(tv) if not isinstance(tv, np.ndarray) else tv
+                    elif 'linear.weight' in checkpoint:
+                        w = checkpoint['linear.weight']
+                        if w.shape[0] == 2:
+                            w_arr = w.cpu().numpy() if hasattr(w, 'cpu') else np.array(w)
+                            layer_info['w_toxic'] = w_arr[1] - w_arr[0]
+                    elif 'fc.weight' in checkpoint:
+                        w = checkpoint['fc.weight']
+                        if w.shape[0] == 2:
+                            w_arr = w.cpu().numpy() if hasattr(w, 'cpu') else np.array(w)
+                            layer_info['w_toxic'] = w_arr[1] - w_arr[0]
+                    elif 'weight' in checkpoint:
+                        w = checkpoint['weight']
+                        if hasattr(w, 'shape') and w.shape[0] == 2:
+                            w_arr = w.cpu().numpy() if hasattr(w, 'cpu') else np.array(w)
+                            layer_info['w_toxic'] = w_arr[1] - w_arr[0]
+                    break
+                except Exception:
+                    continue
+
+        # 方法3：从 toxicity_vectors/all_layers_toxicity_vectors.json 补充向量
+        if 'w_toxic' not in layer_info:
+            tox_json = probe_output_dir / "toxicity_vectors" / "all_layers_toxicity_vectors.json"
+            if tox_json.exists():
+                try:
+                    with open(tox_json, 'r', encoding='utf-8') as f:
+                        all_data = json.load(f)
+                    if 'layers' in all_data and str(layer_idx) in all_data['layers']:
+                        ld = all_data['layers'][str(layer_idx)]
+                        if 'w_toxic' in ld:
+                            layer_info['w_toxic'] = np.array(ld['w_toxic'])
+                        elif 'vector' in ld:
+                            layer_info['w_toxic'] = np.array(ld['vector'])
+                except Exception:
+                    pass
+
+        # 加载 metrics.json
+        metrics_path = layer_folder / "metrics.json"
+        if metrics_path.exists():
+            try:
+                with open(metrics_path, 'r', encoding='utf-8') as f:
+                    metrics = json.load(f)
+
+                if 'val_acc' in metrics:
+                    layer_info['cv_accuracy'] = float(metrics['val_acc'])
+                    layer_info['val_acc'] = float(metrics['val_acc'])
+                elif 'avg_metrics' in metrics and 'avg_val_acc' in metrics['avg_metrics']:
+                    layer_info['cv_accuracy'] = float(metrics['avg_metrics']['avg_val_acc'])
+                elif 'avg_val_acc' in metrics:
+                    layer_info['cv_accuracy'] = float(metrics['avg_val_acc'])
+
+                if 'std_val_acc' in metrics:
+                    layer_info['std'] = float(metrics['std_val_acc'])
+                elif 'avg_metrics' in metrics and 'std_val_acc' in metrics['avg_metrics']:
+                    layer_info['std'] = float(metrics['avg_metrics']['std_val_acc'])
+                elif 'std' in metrics:
+                    layer_info['std'] = float(metrics['std'])
+                else:
+                    layer_info['std'] = 0.0
+
+                if 'avg_metrics' in metrics:
+                    if 'avg_val_s_acc' in metrics['avg_metrics']:
+                        layer_info['safe_acc'] = float(metrics['avg_metrics']['avg_val_s_acc'])
+                    if 'avg_val_h_acc' in metrics['avg_metrics']:
+                        layer_info['harm_acc'] = float(metrics['avg_metrics']['avg_val_h_acc'])
+                elif 'avg_val_s_acc' in metrics:
+                    layer_info['safe_acc'] = float(metrics['avg_val_s_acc'])
+                if 'val_roc_auc' in metrics:
+                    layer_info['val_roc_auc'] = float(metrics['val_roc_auc'])
+                if 'val_pr_auc' in metrics:
+                    layer_info['val_pr_auc'] = float(metrics['val_pr_auc'])
+
+            except Exception:
+                pass
+
+        # 从 toxicity_vectors/layer_toxicity_summary.json 补充元数据
+        if layer_idx not in vectors_by_layer and 'cv_accuracy' not in layer_info:
+            summary_path = probe_output_dir / "toxicity_vectors" / "layer_toxicity_summary.json"
+            if summary_path.exists():
+                try:
+                    with open(summary_path, 'r', encoding='utf-8') as f:
+                        summary = json.load(f)
+                    if 'layers_summary' in summary:
+                        for li in summary['layers_summary']:
+                            if int(li['layer']) == layer_idx:
+                                layer_info['cv_accuracy'] = float(li.get('cv_accuracy', 0))
+                                layer_info['std'] = float(li.get('std', 0))
+                                layer_info['l2_norm'] = float(li.get('l2_norm', 0))
+                                break
+                except Exception:
+                    pass
+
+        if 'w_toxic' in layer_info or 'cv_accuracy' in layer_info:
+            vectors_by_layer[layer_idx] = layer_info
+
+    # 从 linear_probes/all_layers_summary.json 补充元数据（最简单的 fallback）
+    if not vectors_by_layer or any('cv_accuracy' not in v for v in vectors_by_layer.values()):
+        summary_path = probe_output_dir / "linear_probes" / "all_layers_summary.json"
+        if summary_path.exists():
+            try:
+                with open(summary_path, 'r', encoding='utf-8') as f:
+                    summary = json.load(f)
+                if isinstance(summary, list):
+                    for entry in summary:
+                        layer_idx = int(entry.get('layer', 0))
+                        if layer_idx > 0:
+                            if layer_idx not in vectors_by_layer:
+                                vectors_by_layer[layer_idx] = {}
+                            vectors_by_layer[layer_idx].setdefault('cv_accuracy', float(entry.get('cv_avg_val_acc', 0)))
+                            vectors_by_layer[layer_idx].setdefault('std', float(entry.get('cv_std_val_acc', 0)))
+            except Exception:
+                pass
+
+    if not vectors_by_layer:
+        print(f"[Probe Toxic Vectors] 警告: 未能从 {probe_output_dir} 加载任何毒性向量")
+        return {}, {}
+
+    print(f"[Probe Toxic Vectors] 从 {probe_output_dir} 加载了 {len(vectors_by_layer)} 层的毒性向量")
+
+    if vectors_by_layer:
+        sorted_layers = sorted(vectors_by_layer.items(),
+                              key=lambda x: x[1].get('cv_accuracy', 0),
+                              reverse=True)
+        print(f"[Probe Toxic Vectors] 层质量排名（前5层）:")
+        for layer_idx, info in sorted_layers[:5]:
+            acc = info.get('cv_accuracy', 0)
+            std = info.get('std', 0)
+            print(f"  Layer {layer_idx:2d}: CV Acc = {acc*100:.2f}%, Std = {std*100:.2f}%")
+
+    return vectors_by_layer, {}
+
+
+def get_recommended_analysis_layers(
+    probe_output_dir: Union[str, Path] = "outputs",
+    model_id: Optional[str] = None,
+    num_layers: Optional[int] = None,
+    strategy: str = "auto",
+) -> Dict[str, int]:
+    """
+    根据探针训练结果获取推荐的神经元分析层。
+    
+    推荐策略：
+    - "stability": L14（最稳定，std=0.48%）
+    - "accuracy": L32（最高准确率，93.76%）
+    - "balanced": L16（准确率与稳定性平衡，91.62%）
+    - "early_mid": L20（早中层，稳定在 91.8%）
+    - "auto": 根据可用数据自动选择（优先 L32）
+    
+    Args:
+        probe_output_dir: 探针输出目录
+        model_id: 模型 ID
+        num_layers: 总层数（默认 32）
+        strategy: 推荐策略
+    
+    Returns:
+        Dict[str, int]: 各策略的推荐层
+            {
+                'stability': 14,
+                'accuracy': 32,
+                'balanced': 16,
+                'early_mid': 20,
+                'selected': 32,  # 基于 strategy 选择的层
+            }
+    """
+    recommendations = {
+        'stability': None,   # 从探针数据动态推断
+        'accuracy': None,    # 从探针数据动态推断
+        'balanced': None,    # 从探针数据动态推断
+        'early_mid': None,   # 从探针数据动态推断
+        'selected': None,    # 基于 strategy 动态选择
+    }
+
+    vectors_by_layer = {}  # 初始化，避免 except 块中引用未定义变量
+
+    # 尝试从实际数据获取推荐
+    try:
+        vectors_by_layer, _ = load_probe_toxic_vectors_from_snip(probe_output_dir, model_id)
+        if vectors_by_layer:
+            # 兼容新旧格式的准确率获取
+            def _get_acc(info):
+                return info.get('cv_accuracy', info.get('val_acc', 0.0))
+
+            def _get_std(info):
+                if 'std' in info:
+                    return float(info['std'])
+                if 'std_val_acc' in info:
+                    return float(info['std_val_acc'])
+                roc = info.get('val_roc_auc', 0)
+                if roc > 0:
+                    return 1.0 - float(roc)
+                return float('inf')
+
+            # 按准确率排序
+            sorted_by_acc = sorted(vectors_by_layer.items(),
+                                   key=lambda x: _get_acc(x[1]),
+                                   reverse=True)
+
+            # 按稳定性排序（标准差从小到大）
+            sorted_by_std = sorted(vectors_by_layer.items(),
+                                    key=lambda x: _get_std(x[1]))
+
+            if sorted_by_acc:
+                recommendations['accuracy'] = sorted_by_acc[0][0]
+            if sorted_by_std:
+                recommendations['stability'] = sorted_by_std[0][0]
+
+            # 计算平衡层（准确率 >= 90% 且标准差 <= 10%）
+            balanced_candidates = [
+                (layer_idx, info) for layer_idx, info in vectors_by_layer.items()
+                if _get_acc(info) >= 0.90 and _get_std(info) <= 0.10
+            ]
+            if balanced_candidates:
+                best_balanced = min(balanced_candidates,
+                                    key=lambda x: _get_std(x[1]))
+                recommendations['balanced'] = best_balanced[0]
+
+            # 早中层：选择中间范围（如前25%~75%层）中准确率最高的
+            total_layers_range = max(max(vectors_by_layer.keys()), 20) if vectors_by_layer else 32
+            early_mid_min = max(1, int(total_layers_range * 0.15))
+            early_mid_max = max(early_mid_min + 1, int(total_layers_range * 0.75))
+            early_mid_candidates = [
+                (layer_idx, info) for layer_idx, info in sorted_by_acc
+                if early_mid_min <= layer_idx <= early_mid_max
+            ]
+            if early_mid_candidates:
+                recommendations['early_mid'] = early_mid_candidates[0][0]
+    except Exception as e:
+        print(f"[Recommended Layers] 警告: 无法加载探针数据，使用默认值: {e}")
+    
+    # 根据策略选择最终层（优先用探针数据，否则用候选中非None的值）
+    if strategy == "stability":
+        recommendations['selected'] = recommendations['stability']
+    elif strategy == "accuracy":
+        recommendations['selected'] = recommendations['accuracy']
+    elif strategy == "balanced":
+        recommendations['selected'] = recommendations['balanced']
+    elif strategy == "early_mid":
+        recommendations['selected'] = recommendations['early_mid']
+    else:  # auto
+        recommendations['selected'] = recommendations['accuracy']
+
+    # 兜底：如果所有推荐都为 None（无法从探针数据推断），返回空策略
+    if recommendations['selected'] is None:
+        # 从所有可用层索引中选一个中间层作为通用兜底
+        if vectors_by_layer:
+            all_layers = sorted(vectors_by_layer.keys())
+            mid_idx = all_layers[len(all_layers) // 2]
+            recommendations['selected'] = mid_idx
+            recommendations['accuracy'] = mid_idx
+        else:
+            recommendations['selected'] = 0
+            recommendations['accuracy'] = 0
+            recommendations['stability'] = 0
+            recommendations['balanced'] = 0
+            recommendations['early_mid'] = 0
+    
+    print(f"[Recommended Layers] 推荐分析层: {recommendations}")
+    return recommendations
 
 
 def _ensure_pad_token(tokenizer: AutoTokenizer) -> None:
@@ -632,3 +1006,337 @@ def compute_snip_scores_batch(
         loss_fn=loss_fn,
         batch_size=batch_size,
     )
+
+
+# ============================================================================
+# 增强的 SNIP 分析函数（基于探针毒性向量）
+# ============================================================================
+
+def compute_probe_guided_snip_scores(
+    model: nn.Module,
+    tokenizer: AutoTokenizer,
+    dataset: Dataset,
+    device: torch.device,
+    loss_fn: Callable,
+    probe_output_dir: Union[str, Path] = "outputs",
+    model_id: Optional[str] = None,
+    prefer_layer: Optional[int] = None,
+    batch_size: int = 8,
+    num_samples: Optional[int] = None,
+    score_target: Literal["down_proj_out", "mlp_intermediate"] = "down_proj_out",
+    max_length: int = 2048,
+    restrict_grad_to_mlp: bool = True,
+) -> Tuple[Dict[Tuple[int, int], float], Dict[int, Dict]]:
+    """
+    基于探针毒性向量的增强 SNIP 分数计算。
+    
+    该函数在计算 SNIP 分数的同时，加载训练好的探针毒性向量，
+    并为每个神经元添加与毒性向量对齐的信息，用于更精确的安全神经元识别。
+    
+    Args:
+        model: 语言模型
+        tokenizer: 分词器
+        dataset: 数据集
+        device: 设备
+        loss_fn: 损失函数
+        probe_output_dir: 探针输出目录（默认 "outputs"）
+        model_id: 模型 ID
+        prefer_layer: 优先使用的层（默认为 None，自动选择最高准确率层）
+        batch_size: 批大小
+        num_samples: 样本数限制
+        score_target: 打分目标
+        max_length: 最大长度
+        restrict_grad_to_mlp: 是否限制梯度到 MLP
+    
+    Returns:
+        Tuple[Dict, Dict]: 
+            - snip_scores: 每个神经元的 SNIP 分数
+            - toxic_vectors: 各层的毒性向量信息
+    """
+    # 加载探针毒性向量
+    toxic_vectors, _ = load_probe_toxic_vectors_from_snip(probe_output_dir, model_id)
+    
+    if not toxic_vectors:
+        print("[Probe-Guided SNIP] 警告: 未能加载探针毒性向量，使用标准 SNIP")
+        snip_scores = compute_snip_scores(
+            model=model,
+            tokenizer=tokenizer,
+            dataset=dataset,
+            device=device,
+            loss_fn=loss_fn,
+            batch_size=batch_size,
+            num_samples=num_samples,
+            score_target=score_target,
+            max_length=max_length,
+            restrict_grad_to_mlp=restrict_grad_to_mlp,
+        )
+        return snip_scores, {}
+    
+    # 获取推荐的分析层
+    recommendations = get_recommended_analysis_layers(probe_output_dir, model_id)
+    
+    # 确定使用的层
+    if prefer_layer is None:
+        prefer_layer = recommendations['selected']
+    
+    print(f"[Probe-Guided SNIP] 使用分析层: {prefer_layer}")
+    print(f"[Probe-Guided SNIP] 可用毒性向量层: {sorted(toxic_vectors.keys())}")
+    
+    # 计算标准 SNIP 分数
+    snip_scores = compute_snip_scores(
+        model=model,
+        tokenizer=tokenizer,
+        dataset=dataset,
+        device=device,
+        loss_fn=loss_fn,
+        batch_size=batch_size,
+        num_samples=num_samples,
+        score_target=score_target,
+        max_length=max_length,
+        restrict_grad_to_mlp=restrict_grad_to_mlp,
+    )
+    
+    return snip_scores, toxic_vectors
+
+
+def compute_layer_specific_snip_scores(
+    model: nn.Module,
+    tokenizer: AutoTokenizer,
+    dataset: Dataset,
+    device: torch.device,
+    loss_fn: Callable,
+    target_layers: list,
+    toxic_vectors: Dict[int, Dict],
+    batch_size: int = 8,
+    num_samples: Optional[int] = None,
+    score_target: Literal["down_proj_out", "mlp_intermediate"] = "down_proj_out",
+    max_length: int = 2048,
+) -> Dict[int, Dict[Tuple[int, int], float]]:
+    """
+    针对特定层计算 SNIP 分数，并结合毒性向量进行层内排名。
+    
+    Args:
+        model: 语言模型
+        tokenizer: 分词器
+        dataset: 数据集
+        device: 设备
+        loss_fn: 损失函数
+        target_layers: 目标层列表
+        toxic_vectors: 各层的毒性向量信息
+        batch_size: 批大小
+        num_samples: 样本数限制
+        score_target: 打分目标
+        max_length: 最大长度
+    
+    Returns:
+        Dict[int, Dict]: 每层的神经元 SNIP 分数
+            {
+                layer_idx: {
+                    (layer_idx, neuron_idx): snip_score,
+                    ...
+                },
+                ...
+            }
+    """
+    model.eval()
+
+    # 启用 MLP 梯度
+    restrict_grad_to_mlp = True
+    if restrict_grad_to_mlp:
+        model.requires_grad_(False)
+        layers = _get_transformer_layers(model)
+        if layers is not None:
+            for layer in layers:
+                mlp = _get_mlp_module(layer)
+                if mlp is None:
+                    continue
+                for name in ("down_proj", "up_proj", "gate_proj", "output", "w1", "w2", "w3", "fc1", "fc2"):
+                    mod = getattr(mlp, name, None)
+                    if isinstance(mod, nn.Module):
+                        mod.requires_grad_(True)
+    
+    # 存储每层的 SNIP 分数
+    layer_snip_scores = {layer: {} for layer in target_layers if layer in toxic_vectors}
+    
+    # 创建 DataLoader
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    
+    total_batches = len(dataloader)
+    if num_samples:
+        total_batches = min(total_batches, (num_samples + batch_size - 1) // batch_size)
+    
+    print(f"[Layer-Specific SNIP] 开始计算，共 {total_batches} 个批次...")
+    
+    total_samples = 0
+    input_device = _infer_input_device(model, device)
+    
+    # 初始化层分数累加器
+    layer_score_accumulators = {layer: defaultdict(float) for layer in target_layers}
+    
+    for batch_idx, batch in enumerate(dataloader):
+        if num_samples and total_samples >= num_samples:
+            break
+        
+        try:
+            samples = _batch_to_samples(batch)
+        except Exception as e:
+            continue
+        
+        if not samples:
+            continue
+        
+        try:
+            inputs, labels = _build_causal_lm_inputs_and_labels(
+                samples, tokenizer, max_length=max_length, device=input_device
+            )
+        except Exception as e:
+            continue
+        
+        try:
+            model.zero_grad(set_to_none=True)
+            outputs = model(**inputs)
+            
+            loss_batch = dict(batch) if isinstance(batch, dict) else {"samples": samples}
+            loss_batch["input_ids"] = labels
+            loss_batch["labels"] = labels
+            if "attention_mask" in inputs:
+                loss_batch["attention_mask"] = inputs["attention_mask"]
+            
+            loss = loss_fn(outputs, loss_batch, model, input_device)
+            loss.backward()
+        except Exception as e:
+            model.zero_grad(set_to_none=True)
+            continue
+        
+        layers = _get_transformer_layers(model)
+        if layers is None:
+            model.zero_grad(set_to_none=True)
+            continue
+        
+        # 计算每层的 SNIP 分数
+        for layer_idx, layer in enumerate(layers):
+            if layer_idx not in target_layers:
+                continue
+            
+            mlp = _get_mlp_module(layer)
+            if mlp is None:
+                continue
+            
+            if score_target == "down_proj_out":
+                down_proj = _get_linear(mlp, ("down_proj", "output", "fc2", "w2"))
+                if down_proj is None or not hasattr(down_proj, "weight") or down_proj.weight is None:
+                    continue
+                w = down_proj.weight
+                g = getattr(w, "grad", None)
+                if g is None or w.shape != g.shape:
+                    continue
+                
+                scores_vec = (w * g).sum(dim=1).abs().detach().float().cpu()
+                for neuron_idx, s in enumerate(scores_vec.tolist()):
+                    layer_score_accumulators[layer_idx][(layer_idx, neuron_idx)] += float(s)
+        
+        model.zero_grad(set_to_none=True)
+        total_samples += len(samples)
+        
+        if (batch_idx + 1) % 10 == 0:
+            print(f"[Layer-Specific SNIP] 进度: {batch_idx + 1}/{total_batches}")
+    
+    # 平均化
+    if total_samples > 0:
+        for layer_idx in layer_score_accumulators:
+            for key in layer_score_accumulators[layer_idx]:
+                layer_score_accumulators[layer_idx][key] /= total_samples
+    
+    print(f"[Layer-Specific SNIP] 完成: {total_samples} 样本")
+    return {k: dict(v) for k, v in layer_score_accumulators.items() if v}
+
+
+def get_probe_quality_report(
+    probe_output_dir: Union[str, Path] = "outputs",
+    model_id: Optional[str] = None,
+) -> Dict:
+    """
+    生成探针质量报告，用于神经元分析的配置参考。
+    
+    Args:
+        probe_output_dir: 探针输出目录
+        model_id: 模型 ID
+    
+    Returns:
+        Dict: 探针质量报告
+    """
+    report = {
+        "summary": {},
+        "layers_by_accuracy": [],
+        "layers_by_stability": [],
+        "recommended_analysis_layers": {},
+        "layer_groups": {
+            "S_grade": [],   # 93%+ 准确率
+            "A_grade": [],   # 91-92%
+            "B_grade": [],   # 89-91%
+            "C_grade": [],  # 85-89%
+            "D_grade": [],  # <85%
+        }
+    }
+    
+    # 加载毒性向量
+    try:
+        vectors_by_layer, _ = load_probe_toxic_vectors_from_snip(probe_output_dir, model_id)
+    except Exception as e:
+        print(f"[Probe Quality Report] 警告: 无法加载探针数据: {e}")
+        return report
+    
+    if not vectors_by_layer:
+        return report
+    
+    # 按准确率排序
+    sorted_by_acc = sorted(
+        vectors_by_layer.items(),
+        key=lambda x: x[1].get('cv_accuracy', 0),
+        reverse=True
+    )
+    report["layers_by_accuracy"] = [
+        {"layer": idx, "cv_accuracy": info.get('cv_accuracy', 0), "std": info.get('std', 0)}
+        for idx, info in sorted_by_acc
+    ]
+    
+    # 按稳定性排序
+    sorted_by_std = sorted(
+        vectors_by_layer.items(),
+        key=lambda x: x[1].get('std', float('inf'))
+    )
+    report["layers_by_stability"] = [
+        {"layer": idx, "cv_accuracy": info.get('cv_accuracy', 0), "std": info.get('std', 0)}
+        for idx, info in sorted_by_std
+    ]
+    
+    # 分层分组
+    for layer_idx, info in vectors_by_layer.items():
+        acc = info.get('cv_accuracy', 0) * 100
+        if acc >= 93:
+            report["layer_groups"]["S_grade"].append(layer_idx)
+        elif acc >= 91:
+            report["layer_groups"]["A_grade"].append(layer_idx)
+        elif acc >= 89:
+            report["layer_groups"]["B_grade"].append(layer_idx)
+        elif acc >= 85:
+            report["layer_groups"]["C_grade"].append(layer_idx)
+        else:
+            report["layer_groups"]["D_grade"].append(layer_idx)
+    
+    # 推荐分析层
+    recommendations = get_recommended_analysis_layers(probe_output_dir, model_id)
+    report["recommended_analysis_layers"] = recommendations
+    
+    # 汇总信息
+    report["summary"] = {
+        "total_layers": len(vectors_by_layer),
+        "avg_cv_accuracy": np.mean([info.get('cv_accuracy', 0) for info in vectors_by_layer.values()]),
+        "avg_std": np.mean([info.get('std', 0) for info in vectors_by_layer.values()]),
+        "best_accuracy_layer": sorted_by_acc[0][0] if sorted_by_acc else None,
+        "best_accuracy": sorted_by_acc[0][1].get('cv_accuracy', 0) if sorted_by_acc else 0,
+        "most_stable_layer": sorted_by_std[0][0] if sorted_by_std else None,
+        "best_std": sorted_by_std[0][1].get('std', 0) if sorted_by_std else 0,
+    }
+    
+    return report
