@@ -10,10 +10,12 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    host: '0.0.0.0',
+    port: 6006,
+    allowedHosts: ['u890596-8e64-01e96491.westc.seetacloud.com'],
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:6008',
         changeOrigin: true,
       },
     },

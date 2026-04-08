@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Panel A</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 100vh;
+            overflow: auto;
+        }
+
+        .panel-header {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #333;
+        }
+
+        .section {
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        select, input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        button {
+            padding: 8px 16px;
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-right: 8px;
+            margin-top: 8px;
+        }
+
+        button:hover {
+            background-color: #1d4ed8;
+        }
+
+        button.secondary {
+            background-color: #6b7280;
+        }
+
+        button.secondary:hover {
+            background-color: #4b5563;
+        }
+
+        .info-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+
+        .input-group input {
+            flex: 1;
+            height: 32px;
+        }
+
+        .input-group button {
+            height: 32px;
+            margin-top: 0;
+            white-space: nowrap;
+        }
+
+        .inline-group {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            flex-wrap: nowrap;
+        }
+
+        .inline-group select {
+            flex: 0 0 auto;
+            width: auto;
+            min-width: 120px;
+            max-width: 150px;
+            padding: 5px 6px;
+            font-size: 12px;
+        }
+
+        .inline-group button {
+            margin-top: 0;
+            padding: 5px 12px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .task-log {
+            display: none;
+            margin-top: 8px;
+            background: #1e1e1e;
+            border-radius: 4px;
+            padding: 8px;
+        }
+        .task-log pre {
+            color: #d4d4d4;
+            font-size: 11px;
+            font-family: monospace;
+            max-height: 120px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+        }
+        .status-bar {
+            font-size: 12px;
+            margin-top: 4px;
+            min-height: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="panel-header" data-i18n="controlPanel">Control Panel A</div>
+
+    <!-- Model Path -->
+    <div class="section">
+        <div class="section-title" data-i18n="model">Model</div>
+        <div class="form-group">
+            <label data-i18n="modelPath">Model Path</label>
+            <div class="input-group">
+                <input type="text" id="modelPathInput" placeholder="/path/to/model">
+                <button id="browseBtn" data-i18n="browse">Browse</button>
+                <input type="file" id="folderInput" webkitdirectory style="display:none;">
+            </div>
+            <div class="info-text" id="modelInfo"></div>
+        </div>
+    </div>
+
+    <!-- Online API -->
+    <div class="section">
+        <div class="section-title" data-i18n="onlineAPI">Online API</div>
+        <div class="form-group">
+            <label data-i18n="provider">Provider</label>
+            <select id="apiProvider">
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="google">Google (Gemini)</option>
+                <option value="together">Together AI</option>
+                <option value="azure">Azure OpenAI</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label data-i18n="model">Model</label>
+            <select id="apiModel"></select>
+        </div>
+        <div class="form-group">
+            <label data-i18n="apiKey">API Key</label>
+            <input type="password" id="apiKey" data-i18n-placeholder="enterApiKey" placeholder="Enter API key">
+        </div>
+        <div class="form-group" id="baseUrlGroup" style="display:none;">
+            <label data-i18n="baseUrlOptional">Base URL (Optional)</label>
+            <input type="text" id="baseUrl" placeholder="https://api.example.com/v1">
+        </div>
+        <div class="form-group">
+            <div class="inline-group">
+                <button id="connectBtn" data-i18n="connect">Connect</button>
+                <button class="secondary" id="disconnectBtn" data-i18n="disconnect">Disconnect</button>
+            </div>
+        </div>
+        <div class="info-text" id="apiStatus" data-i18n="statusNotConnected">Status: Not connected</div>
+    </div>
+
+    <!-- Fine-Tuning -->
+    <div class="section">
+        <div class="section-title" data-i18n="fineTuning">Fine-Tuning</div>
+        <div class="form-group">
+            <label data-i18n="evalLog">Evaluation Log</label>
+            <input type="text" id="evalLogInput" value="outputs/base_evaluation.jsonl">
+        </div>
+        <div class="form-group">
+            <label data-i18n="safetyNeurons">Safety Neurons File</label>
+            <input type="text" id="safetyNeuronsInput" value="outputs/dedicated_safety_neurons.json">
+        </div>
+        <div class="form-group">
+            <div class="inline-group">
+                <label style="margin-bottom:0;white-space:nowrap;" data-i18n="epoch">Epochs:</label>
+                <input type="number" id="epochInput" value="3" min="1" max="100" style="width:55px;flex:0 0 auto;">
+                <label style="margin-bottom:0;white-space:nowrap;" data-i18n="batchSize">Batch:</label>
+                <input type="number" id="batchSizeInput" value="4" min="1" max="64" style="width:50px;flex:0 0 auto;">
+                <label style="margin-bottom:0;white-space:nowrap;" data-i18n="learningRate">LR:</label>
+                <input type="text" id="learningRateInput" value="5e-5" style="width:60px;flex:0 0 auto;">
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="inline-group">
+                <button id="startFtBtn" data-i18n="start">Start Fine-Tune</button>
+                <button class="secondary" id="pauseFtBtn" data-i18n="pause">Stop</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pipeline -->
+    <div class="section">
+        <div class="section-title" data-i18n="pipeline">Pipeline</div>
+        <div class="form-group">
+            <div class="inline-group">
+                <label style="margin-bottom:0;white-space:nowrap;" data-i18n="fromPhase">From Phase:</label>
+                <input type="number" id="fromPhaseInput" value="0" min="0" max="10" style="width:55px;flex:0 0 auto;">
+                <button id="runPipelineBtn" data-i18n="runPipeline">Run Pipeline</button>
+                <button class="secondary" id="runAsrBtn" data-i18n="runAsr">ASR Eval</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Safety Neuron -->
+    <div class="section">
+        <div class="section-title" data-i18n="safetyNeuron">Safety Neuron</div>
+        <div class="form-group">
+            <div class="inline-group">
+                <label style="margin-bottom:0;white-space:nowrap;" data-i18n="sparsity">Sparsity (%):</label>
+                <input type="number" id="sparsityInput" value="0.34" step="0.01" min="0" max="100" style="width:65px;flex:0 0 auto;">
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="inline-group">
+                <label style="margin-bottom:0;white-space:nowrap;" data-i18n="p">p:</label>
+                <input type="number" id="pInput" value="0.01" step="0.001" min="0" max="1" style="width:65px;flex:0 0 auto;">
+                <label style="margin-bottom:0;white-space:nowrap;" data-i18n="q">q:</label>
+                <input type="number" id="qInput" value="0.005" step="0.001" min="0" max="1" style="width:65px;flex:0 0 auto;">
+                <button id="setBtn" data-i18n="set" style="margin-top:0;padding:5px 12px;font-size:12px;">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configuration -->
+    <div class="section">
+        <div class="section-title" data-i18n="configuration">Configuration</div>
+        <div class="form-group">
+            <div class="inline-group">
+                <label style="margin-bottom:0;white-space:nowrap;width:70px;flex:0 0 70px;" data-i18n="layers">Layers</label>
+                <select id="layersSelect" style="flex:1;">
+                    <option value="all" data-i18n="allLayers">All Layers</option>
+                    <option value="0-16">Layers 0-16</option>
+                    <option value="17-32">Layers 17-32</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <div class="inline-group">
+                <label style="margin-bottom:0;white-space:nowrap;width:70px;flex:0 0 70px;" data-i18n="quadrants">Quadrants</label>
+                <select id="quadrantsSelect" style="flex:1;">
+                    <option value="all" data-i18n="allQuadrants">All Quadrants</option>
+                    <option value="q1">Q1 (S+A+)</option>
+                    <option value="q2">Q2 (S-A-)</option>
+                    <option value="q3">Q3 (S+A-)</option>
+                    <option value="q4">Q4 (S-A+)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Task status + log -->
+    <div class="section">
+        <div class="status-bar" id="taskStatus"></div>
+        <div class="task-log" id="taskLog">
+            <pre id="logContent"></pre>
+        </div>
+        <div class="form-group" style="margin-top:8px;">
+            <button id="xBreakBtn" data-i18n="xBreak" style="background-color:#ef4444;width:100%;">X Break (Stop All)</button>
+        </div>
+    </div>
+
+    <script>
+        const API = 'http://localhost:6008';
+        let currentTask = null;   // { task_id, type, pollTimer }
+
+        // ── helpers ──────────────────────────────────────────────
+        function broadcast(data) {
+            data.source = 'panelA';
+            window.parent.postMessage(data, '*');
+        }
+
+        function setStatus(id, msg, color) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.textContent = msg;
+            el.style.color = color || '#666';
+        }
+
+        async function apiFetch(path, method = 'GET', body = null) {
+            const opts = { method, headers: { 'Content-Type': 'application/json' } };
+            if (body) opts.body = JSON.stringify(body);
+            const res = await fetch(API + path, opts);
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        }
+
+        // ── task polling ──────────────────────────────────────────
+        let logOffset = 0;
+        function startPolling(taskId) {
+            logOffset = 0;
+            document.getElementById('taskLog').style.display = 'block';
+            document.getElementById('logContent').textContent = '';
+            const timer = setInterval(async () => {
+                try {
+                    const d = await apiFetch(`/api/tasks/${taskId}?log_offset=${logOffset}`);
+                    if (d.log && d.log.length) {
+                        document.getElementById('logContent').textContent += d.log.join('\n') + '\n';
+                        logOffset += d.log.length;
+                        document.getElementById('logContent').scrollTop = 9999;
+                    }
+                    setStatus('taskStatus', t('status') + ': ' + d.status,
+                        d.status === 'completed' ? 'green' : d.status === 'failed' ? 'red' : '#f59e0b');
+                    if (d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled') {
+                        clearInterval(timer);
+                        currentTask = null;
+                        broadcast({ type: 'taskDone', taskId, status: d.status });
+                    }
+                } catch (e) { /* ignore transient errors */ }
+            }, 1500);
+            currentTask = { task_id: taskId, pollTimer: timer };
+        }
+
+        // ── Model section ─────────────────────────────────────────
+        let currentModelPath = localStorage.getItem('modelPath') || '';
+        const DEFAULT_MODEL = '/root/autodl-tmp/neurolens/ms_models/LLM-Research/Meta-Llama-3-8B-Instruct';
+        const DEFAULT_CLASSIFIER = '/root/autodl-tmp/neurolens/ms_models/Qwen/Qwen3Guard-Gen-8B';
+
+        function initModelPath() {
+            const path = currentModelPath || DEFAULT_MODEL;
+            document.getElementById('modelPath').value = path;
+            document.getElementById('modelInfo').textContent = t('current') + ' ' + path.split('/').pop();
+        }
+
+        document.getElementById('browseBtn').addEventListener('click', () => {
+            document.getElementById('folderInput').click();
+        });
+
+        document.getElementById('folderInput').addEventListener('change', function(e) {
+            const files = e.target.files;
+            if (!files.length) return;
+            const rel = files[0].webkitRelativePath || files[0].name;
+            const folder = rel.split('/')[0];
+            localStorage.setItem('modelPath', folder);
+            currentModelPath = folder;
+            document.getElementById('modelPath').value = folder;
+            document.getElementById('modelInfo').textContent = t('current') + ' ' + folder;
+            broadcast({ type: 'modelChanged', path: folder, name: folder });
+        });
+
+        document.getElementById('modelPathInput').addEventListener('change', function() {
+            const v = this.value.trim();
+            if (!v) return;
+            localStorage.setItem('modelPath', v);
+            currentModelPath = v;
+            document.getElementById('modelInfo').textContent = t('current') + ' ' + v.split('/').pop();
+            broadcast({ type: 'modelChanged', path: v, name: v.split('/').pop() });
+        });
+
+        // ── Online API section ────────────────────────────────────
+        const apiProviders = {
+            openai:    { name:'OpenAI', models:[{value:'gpt-4o',label:'GPT-4o'},{value:'gpt-4.1',label:'GPT-4.1'},{value:'gpt-4o-mini',label:'GPT-4o mini'}], hasBaseUrl:false },
+            anthropic: { name:'Anthropic', models:[{value:'claude-sonnet-4-6',label:'Claude Sonnet 4.6'},{value:'claude-opus-4-6',label:'Claude Opus 4.6'},{value:'claude-haiku-4-5',label:'Claude Haiku 4.5'}], hasBaseUrl:false },
+            google:    { name:'Google', models:[{value:'gemini-2.5-pro',label:'Gemini 2.5 Pro'},{value:'gemini-2.5-flash',label:'Gemini 2.5 Flash'}], hasBaseUrl:true },
+            together:  { name:'Together AI', models:[{value:'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',label:'Llama 4 Maverick'},{value:'meta-llama/Llama-3.1-70B-Instruct',label:'Llama 3.1 70B'}], hasBaseUrl:false },
+            azure:     { name:'Azure OpenAI', models:[{value:'gpt-4.1',label:'GPT-4.1'},{value:'gpt-4o',label:'GPT-4o'}], hasBaseUrl:true },
+        };
+        let apiConfig = { provider:'openai', model:'gpt-4o', apiKey:'', connected:false };
+
+        function updateApiModels() {
+            const prov = document.getElementById('apiProvider').value;
+            const sel = document.getElementById('apiModel');
+            sel.innerHTML = '';
+            (apiProviders[prov]?.models || []).forEach(m => {
+                const o = document.createElement('option');
+                o.value = m.value; o.textContent = m.label; sel.appendChild(o);
+            });
+            document.getElementById('baseUrlGroup').style.display = apiProviders[prov]?.hasBaseUrl ? 'block' : 'none';
+            apiConfig.provider = prov;
+            apiConfig.model = sel.value;
+        }
+
+        document.getElementById('apiProvider').addEventListener('change', updateApiModels);
+        document.getElementById('apiModel').addEventListener('change', function() { apiConfig.model = this.value; });
+        document.getElementById('apiKey').addEventListener('input', function() { apiConfig.apiKey = this.value; });
+
+        document.getElementById('connectBtn').addEventListener('click', function() {
+            const key = document.getElementById('apiKey').value.trim();
+            if (!key) { alert(t('enterApiKey')); return; }
+            apiConfig.apiKey = key; apiConfig.connected = true;
+            setStatus('apiStatus', t('statusConnected') + ' ' + (apiProviders[apiConfig.provider]?.name || apiConfig.provider), 'green');
+            localStorage.setItem('apiConfig', JSON.stringify(apiConfig));
+            broadcast({ type:'apiConnected', provider:apiConfig.provider, model:apiConfig.model });
+        });
+
+        document.getElementById('disconnectBtn').addEventListener('click', function() {
+            apiConfig = { provider:'openai', model:'gpt-4o', apiKey:'', connected:false };
+            document.getElementById('apiKey').value = '';
+            setStatus('apiStatus', t('statusNotConnected'), '#666');
+            localStorage.removeItem('apiConfig');
+            broadcast({ type:'apiDisconnected' });
+        });
+
+        function loadApiConfig() {
+            const saved = localStorage.getItem('apiConfig');
+            if (saved) try {
+                const c = JSON.parse(saved);
+                document.getElementById('apiProvider').value = c.provider || 'openai';
+                updateApiModels();
+                if (c.model) document.getElementById('apiModel').value = c.model;
+                if (c.baseUrl) document.getElementById('baseUrl').value = c.baseUrl;
+                if (c.connected) setStatus('apiStatus', t('statusConnected') + ' ' + (apiProviders[c.provider]?.name||c.provider), 'green');
+            } catch(e) {}
+            else updateApiModels();
+        }
+
+        // ── Fine-Tuning section ───────────────────────────────────
+        document.getElementById('startFtBtn').addEventListener('click', async function() {
+            const modelPath = document.getElementById('modelPathInput').value.trim() || DEFAULT_MODEL;
+            const evalLog = document.getElementById('evalLogInput').value.trim() || 'outputs/base_evaluation.jsonl';
+            const safetyNeurons = document.getElementById('safetyNeuronsInput').value.trim() || 'outputs/dedicated_safety_neurons.json';
+            const epochs = parseInt(document.getElementById('epochInput').value) || 3;
+            const lr = parseFloat(document.getElementById('learningRateInput').value) || 5e-5;
+            const batchSize = parseInt(document.getElementById('batchSizeInput').value) || 4;
+            try {
+                const r = await apiFetch('/api/tasks/finetune', 'POST', {
+                    model_path: modelPath,
+                    evaluation_log: evalLog,
+                    safety_neurons: safetyNeurons,
+                    output: 'outputs/tsft_finetuning',
+                    num_epochs: epochs,
+                    batch_size: batchSize,
+                    learning_rate: lr,
+                    save_only_delta: true,
+                    bf16: true
+                });
+                setStatus('taskStatus', t('status') + ': pending', '#f59e0b');
+                startPolling(r.task_id);
+            } catch(e) { setStatus('taskStatus', 'Error: ' + e.message, 'red'); }
+        });
+
+        document.getElementById('pauseFtBtn').addEventListener('click', async function() {
+            if (!currentTask) return;
+            try {
+                await apiFetch('/api/tasks/' + currentTask.task_id, 'DELETE');
+                clearInterval(currentTask.pollTimer);
+                currentTask = null;
+                setStatus('taskStatus', t('status') + ': cancelled', '#6b7280');
+            } catch(e) {}
+        });
+
+        // ── Pipeline section ──────────────────────────────────────
+        document.getElementById('runPipelineBtn').addEventListener('click', async function() {
+            const modelPath = document.getElementById('modelPathInput').value.trim() || DEFAULT_MODEL;
+            const fromPhase = parseInt(document.getElementById('fromPhaseInput').value) || 0;
+            const q = parseFloat(document.getElementById('qInput').value) || 0.005;
+            const p = parseFloat(document.getElementById('pInput').value) || 0.01;
+            try {
+                const r = await apiFetch('/api/tasks/pipeline', 'POST', {
+                    model_path: modelPath,
+                    from_phase: fromPhase,
+                    safety_threshold_q: q,
+                    utility_threshold_p: p,
+                    bf16: true
+                });
+                setStatus('taskStatus', t('status') + ': pending', '#f59e0b');
+                startPolling(r.task_id);
+            } catch(e) { setStatus('taskStatus', 'Error: ' + e.message, 'red'); }
+        });
+
+        // ── ASR Evaluation ────────────────────────────────────────
+        document.getElementById('runAsrBtn').addEventListener('click', async function() {
+            const modelPath = document.getElementById('modelPathInput').value.trim() || DEFAULT_MODEL;
+            try {
+                const r = await apiFetch('/api/tasks/asr', 'POST', {
+                    model_path: modelPath,
+                    classifier_path: DEFAULT_CLASSIFIER,
+                    output: 'outputs/asr_results.jsonl'
+                });
+                setStatus('taskStatus', t('status') + ': pending', '#f59e0b');
+                startPolling(r.task_id);
+            } catch(e) { setStatus('taskStatus', 'Error: ' + e.message, 'red'); }
+        });
+
+        // ── Safety Neuron / Config ────────────────────────────────
+        document.getElementById('setBtn').addEventListener('click', function() {
+            const p = document.getElementById('pInput').value;
+            const q = document.getElementById('qInput').value;
+            const sparsity = document.getElementById('sparsityInput').value;
+            broadcast({ type:'safetyNeuronConfig', p, q, sparsity });
+            setStatus('taskStatus', t('status') + ': params set', 'green');
+            setTimeout(() => setStatus('taskStatus', ''), 2000);
+        });
+
+        document.getElementById('layersSelect').addEventListener('change', function() {
+            broadcast({ type:'configChange', layers: this.value });
+        });
+
+        document.getElementById('quadrantsSelect').addEventListener('change', function() {
+            broadcast({ type:'configChange', quadrants: this.value });
+        });
+
+        // ── X Break ───────────────────────────────────────────────
+        document.getElementById('xBreakBtn').addEventListener('click', async function() {
+            if (currentTask) {
+                try {
+                    await apiFetch('/api/tasks/' + currentTask.task_id, 'DELETE');
+                    clearInterval(currentTask.pollTimer);
+                    currentTask = null;
+                } catch(e) {}
+            }
+            setStatus('taskStatus', t('status') + ': aborted', 'red');
+            broadcast({ type:'xBreak' });
+        });
+
+        // ── i18n ──────────────────────────────────────────────────
+        let currentLangA = localStorage.getItem('language') || 'en';
+        const translationsA = {
+            en: {
+                controlPanel:'Control Panel A', model:'Model', modelPath:'Model Path',
+                selectModelFolder:'Select Folder', noFolderSelected:'No folder selected',
+                browse:'Browse', current:'Current:', upload:'Upload', export:'Export',
+                onlineAPI:'Online API', provider:'Provider', apiKey:'API Key',
+                baseUrlOptional:'Base URL (Optional)', connect:'Connect', disconnect:'Disconnect',
+                statusNotConnected:'Status: Not connected', statusConnected:'Status: Connected to',
+                fineTuning:'Fine-Tuning', epoch:'Epochs:', batchSize:'Batch Size:',
+                learningRate:'Learning Rate:', start:'Start Fine-Tune', pause:'Stop',
+                evalLog:'Evaluation Log', safetyNeurons:'Safety Neurons File',
+                pipeline:'Pipeline', fromPhase:'From Phase:', runPipeline:'Run Pipeline',
+                runAsr:'Run ASR Eval',
+                safetyNeuron:'Safety Neuron', sparsity:'Sparsity (%)', p:'p (utility)', q:'q (safety)', set:'Apply',
+                configuration:'Configuration', layers:'Layers', quadrants:'Quadrants',
+                allLayers:'All Layers', allQuadrants:'All Quadrants',
+                xBreak:'X Break (Stop All)', enterApiKey:'Enter API key',
+                status:'Status', taskLog:'Task Log'
+            },
+            zh: {
+                controlPanel:'控制面板 A', model:'模型', modelPath:'模型路径',
+                selectModelFolder:'选择文件夹', noFolderSelected:'未选择文件夹',
+                browse:'浏览', current:'当前：', upload:'上传', export:'导出',
+                onlineAPI:'在线 API', provider:'供应商', apiKey:'API 密钥',
+                baseUrlOptional:'基础 URL（可选）', connect:'连接', disconnect:'断开',
+                statusNotConnected:'状态：未连接', statusConnected:'状态：已连接',
+                fineTuning:'微调', epoch:'轮次：', batchSize:'批大小：',
+                learningRate:'学习率：', start:'开始微调', pause:'停止',
+                evalLog:'评估日志', safetyNeurons:'安全神经元文件',
+                pipeline:'流水线', fromPhase:'从阶段：', runPipeline:'运行流水线',
+                runAsr:'运行 ASR 评估',
+                safetyNeuron:'安全神经元', sparsity:'稀疏度 (%)', p:'p（实用性阈值）', q:'q（安全阈值）', set:'应用',
+                configuration:'配置', layers:'层级', quadrants:'象限',
+                allLayers:'所有层级', allQuadrants:'所有象限',
+                xBreak:'X 中断（停止全部）', enterApiKey:'请输入 API Key',
+                status:'状态', taskLog:'任务日志'
+            }
+        };
+
+        function t(key) {
+            return (translationsA[currentLangA] || translationsA.en)[key] || key;
+        }
+
+        function updatePanelALanguage(lang) {
+            currentLangA = lang;
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                const v = t(key);
+                if (v) el.textContent = v;
+            });
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+                const key = el.getAttribute('data-i18n-placeholder');
+                const v = t(key);
+                if (v) el.placeholder = v;
+            });
+        }
+
+        window.addEventListener('message', e => {
+            if (e.data?.type === 'languageChange') updatePanelALanguage(e.data.lang);
+        });
+
+        // ── init ──────────────────────────────────────────────────
+        initModelPath();
+        loadApiConfig();
+        updatePanelALanguage(currentLangA);
+    </script>
+</body>
+</html>

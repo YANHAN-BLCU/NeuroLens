@@ -1,6 +1,6 @@
 // Representation View Component - PCA/t-SNE Visualization
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Plot from 'react-plotly.js';
 import {
   Box,
@@ -26,7 +26,6 @@ export const RepresentationView: React.FC = () => {
   const [perplexity, setPerplexity] = useState<number>(30);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const plotRef = useRef<any>(null);
 
   // Fetch representation data from API
   useEffect(() => {
@@ -142,6 +141,7 @@ export const RepresentationView: React.FC = () => {
       )}
 
       {!isLoading && data && (
+      <>
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} sm={4}>
@@ -237,14 +237,12 @@ export const RepresentationView: React.FC = () => {
               font: { size: 18, family: 'Times New Roman' },
             },
             xaxis: {
-              title: 'Dimension 1',
-              titlefont: { family: 'Times New Roman', size: 14 },
+              title: { text: 'Dimension 1', font: { family: 'Times New Roman', size: 14 } },
               showgrid: true,
               zeroline: true,
             },
             yaxis: {
-              title: 'Dimension 2',
-              titlefont: { family: 'Times New Roman', size: 14 },
+              title: { text: 'Dimension 2', font: { family: 'Times New Roman', size: 14 } },
               showgrid: true,
               zeroline: true,
             },
@@ -276,6 +274,7 @@ export const RepresentationView: React.FC = () => {
           }}
         />
       </Paper>
+      </>
       )}
     </Box>
   );

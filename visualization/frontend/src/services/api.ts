@@ -29,8 +29,8 @@ const apiClient = axios.create({
 
 // Response interceptor for error handling
 apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
+  (response: import('axios').AxiosResponse) => response,
+  (error: import('axios').AxiosError) => {
     console.error('API Error:', error);
     return Promise.reject(error);
   }

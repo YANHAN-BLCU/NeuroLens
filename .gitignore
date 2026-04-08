@@ -86,16 +86,9 @@ ms_models/**/original/*.pth
 Thumbs.db
 .DS_Store
 
-# Temporary files
-*.tmp
-*.swp
-*.swo
+# Electron
+dist-electron/
+electron/dist/
+.venv/
+node_modules/
 
-# PDF files (large documentation)
-*.pdf
-
-# Temporary markdown/documentation files
-FIX_GENERATION_WARNING.md
-PATH_ALIGNMENT_CHECK.md
-QUICKFIX_GUIDE.md
-SOLUTION_SUMMARY.md

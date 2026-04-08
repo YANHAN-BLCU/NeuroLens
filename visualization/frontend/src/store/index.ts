@@ -33,7 +33,7 @@ interface AppState {
   finetuneTask: FinetuneTask | null;
   
   // UI State
-  activeView: 'metrics' | 'representation' | 'layers' | 'neurons' | 'instances';
+  activeView: 'dashboard' | 'metrics' | 'representation' | 'activation-projection' | 'layers' | 'neurons' | 'instances';
   selectedLayer: number;
   selectedNeuron: string | null;
   isLoading: boolean;
@@ -86,7 +86,7 @@ export const useStore = create<AppState>((set, get) => ({
   instanceData: null,
   finetuneTask: null,
   
-  activeView: 'metrics',
+  activeView: 'dashboard',
   selectedLayer: DEFAULT_LAYER,
   selectedNeuron: null,
   isLoading: false,

@@ -1,401 +1,282 @@
 # NeuroLens
 
-一个基于 Llama 推理模型和 Llama Guard 安全审核的 AI 安全评估研究项目，专注于大语言模型安全防护能力的研究与评估。
+大语言模型安全神经元分析与可视化研究平台，实现 NeuroBreak 论文的完整研究管线：从神经元识别、激活投影、象限分类，到目标安全微调（TSFT）与攻击成功率（ASR）评估。
 
-## ✨ 功能特性
+## 功能特性
 
-- 🤖 **智能推理**：基于 Meta Llama 3 8B 模型进行文本生成和对话
-- 🛡️ **安全审核**：集成 Llama Guard 3 进行内容安全检测和过滤
-- 🧪 **SALAD 评估**：支持 SALAD-Bench 数据集评估，测试模型安全防护能力
-- 🔍 **线性探针训练**：训练分层线性探针，识别模型隐藏状态中的有害语义
-- 📊 **可视化系统**：提供 6 个可视化视图（指标、表征、层、神经元、实例、控制面板）
-- 📈 **结果分析**：提供完整的评估结果分析和报告生成
-- 🐳 **Docker 支持**：完整的容器化部署方案，便于实验环境复现
-- ⚙️ **灵活配置**：支持自定义模型参数、审核阈值和类别
-- 📈 **数据划分策略**：支持多种数据划分方案（6:2:2、6.5:1:1.5等）和过采样
+- **神经元分析**：识别安全神经元 S(q) 与效用神经元 U(p)，计算专用安全神经元 D(p,q) = S(q) \ U(p)
+- **SNIP 评分**：基于 I = |w ⊙ ∇L| 的神经元重要性评分与离线选择
+- **激活与对齐分析**：激活投影 A_i^k、参数对齐 S_i^k，支持跨层演化追踪
+- **象限分类**：将神经元按安全性与激活度分为四象限（S+A+, S-A+, S+A-, S-A-）
+- **线性探针**：训练分层线性探针，识别隐藏状态中的有害语义表征
+- **目标安全微调（TSFT）**：定向增强安全神经元，VA-TSFT 进一步考虑脆弱性感知
+- **SALAD-Bench 评估**：完整的越狱攻击成功率与效用保持度评估管线
+- **可视化系统**：9 个交互式分析面板，支持任务触发、实时日志、数据探索
 
-## 🏗️ 技术栈
+## 支持的模型
 
-### 核心框架
-- **深度学习**：PyTorch 2.6.0 + CUDA 12.4
-- **模型库**：Transformers 4.46.3
-- **量化加速**：BitsAndBytes 4-bit 量化
-- **模型管理**：ModelScope（推荐，中国大陆访问更快）或 HuggingFace Transformers
+NeuroLens 使用 HuggingFace `transformers` 标准接口加载模型，原则上支持任何基于 `AutoModelForCausalLM` 的因果语言模型。
 
-### 前端可视化
-- **框架**：React 18 + TypeScript
-- **UI 组件**：Material UI
-- **图表库**：ECharts、Plotly.js、Cytoscape.js
-- **状态管理**：Zustand
-- **构建工具**：Vite
+**官方测试模型**（开箱即用）：
+- **目标 LLM**：`LLM-Research/Meta-Llama-3-8B-Instruct`（ModelScope）/ `meta-llama/Meta-Llama-3-8B-Instruct`（HuggingFace）
+- **安全分类器**：`LLM-Research/Llama-Guard-3-8B`（ModelScope）/ `meta-llama/Llama-Guard-3-8B`（HuggingFace）
 
-### 后端 API
-- **框架**：FastAPI
-- **数据处理**：NumPy、Pydantic
+使用其他模型时，在 `engine/models.py` 中修改 `LLM_ID` / `GUARD_ID` 常量，或在脚本调用时传入 `--model_id` 参数。
 
-### 部署
-- **容器化**：Docker + NVIDIA CUDA 12.4
+## 技术栈
 
-## 📋 前提条件
+| 类别 | 技术 |
+|------|------|
+| 深度学习 | PyTorch 2.6.0 + CUDA 12.4 |
+| 模型库 | Transformers 4.46.3，BitsAndBytes（4-bit 量化） |
+| 后端 API | FastAPI + Uvicorn |
+| 前端可视化 | React 18 + TypeScript，ECharts / Plotly.js / D3.js，Zustand |
+| 构建工具 | Vite |
 
-- Python 3.9+
-- CUDA 12.4+ (推荐，用于 GPU 加速，8B 模型需要)
-- Docker (可选，用于容器化部署)
-- Node.js 18+ (用于前端开发)
-- ModelScope 账号（推荐，中国大陆访问更快）或 HuggingFace 账号，已申请模型访问权限
-  - ModelScope: `LLM-Research/Meta-Llama-3-8B-Instruct` 与 `LLM-Research/Llama-Guard-3-8B`
-  - HuggingFace: `meta-llama/Meta-Llama-3-8B-Instruct` 与 `meta-llama/Llama-Guard-3-8B`
-
-## 🚀 快速开始
+## 快速开始
 
 ### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/YANHAN-BLCU/NeuroLens.git
-cd NeuroBreak-Reproduction
+cd NeuroLens
 ```
 
 ### 2. 安装依赖
 
 ```bash
-# Python 依赖
 pip install -r requirements.txt
-
-# 前端依赖 (可选，仅开发可视化)
-cd visualization/frontend
-npm install
 ```
 
-### 3. 配置环境变量
+### 3. 准备模型
 
-创建 `.env` 文件（或设置环境变量）：
-
-```bash
-# ModelScope Token（推荐，中国大陆访问更快）
-MODELSCOPE_TOKEN=your_modelscope_token_here
-
-# 或者使用 HuggingFace Token
-# HF_TOKEN=your_huggingface_token_here
-
-# 模型路径（可选，默认使用 ModelScope/HuggingFace 缓存）
-MODEL_CACHE_DIR=/path/to/models
-```
-
-### 4. 下载模型（可选）
-
-使用提供的脚本下载模型：
+将模型放置到 `ms_models/` 目录，或通过脚本下载：
 
 ```bash
-# 下载默认的 8B 模型（使用 ModelScope）
-python scripts/download_models.py --all-8b
+# 下载官方测试模型（Llama-3-8B-Instruct + Llama-Guard-3-8B）
+python scripts/data/download_models.py --all-8b
 
-# 设置 ModelScope token（如果需要）
+# 使用 ModelScope（中国大陆推荐）
 export MODELSCOPE_TOKEN=your_token
-python scripts/download_models.py --all-8b
+python scripts/data/download_models.py --all-8b
+
+# 使用 HuggingFace
+export HF_TOKEN=your_token
+python scripts/data/download_models.py --all-8b --source hf
 ```
 
-### 5. 运行评估实验
-
-#### SALAD-Bench 数据集评估
+使用自定义模型时，直接将模型目录放入 `ms_models/` 或设置绝对路径：
 
 ```bash
-# 在 Docker 容器内运行
-docker exec -it neurolens /bin/bash
-cd /workspace
-python scripts/evaluate_salad_pipeline.py \
-    --data_dir /workspace/data/salad/raw \
-    --output /workspace/logs/salad_evaluation.jsonl \
-    --config base_set \
-    --max_samples 100
+export NEUROLENS_MODEL_PATH=/path/to/your/model
 ```
 
-或使用 PowerShell 脚本（Windows）：
+### 4. 运行核心管线
 
-```powershell
-.\scripts\run_salad_evaluation.ps1 -Config base_set -MaxSamples 100
-```
-
-#### 线性探针训练
-
-训练分层线性探针，识别模型隐藏状态中的有害语义：
+#### 一键运行完整 NeuroBreak 管线
 
 ```bash
-# 基本训练（6.5:1:1.5 划分方案）
-python scripts/train_linear_probes.py \
-    --data_file data/salad/raw/base_evaluation.jsonl \
-    --output_dir outputs/probes \
-    --num_epochs 80 \
-    --lr 3e-3
+python scripts/pipeline/run_neurobreak_pipeline.py \
+    --model_id LLM-Research/Meta-Llama-3-8B-Instruct \
+    --data_dir data/salad/raw \
+    --output_dir outputs
+```
 
-# 6:2:2 划分 + 训练集过采样（方案A：1:1.5比例）
-python scripts/train_622_full.py \
-    --data_file data/salad/raw/base_evaluation.jsonl \
-    --output_dir outputs/probes_622_full \
-    --oversample_probe_train \
-    --num_epochs 80
+#### 分阶段运行
 
-# 6:2:2 划分 + 1.5:1 训练集比例 + 测试集评估
-python scripts/train_test_1_5_1.py \
-    --data_file data/salad/raw/base_evaluation.jsonl \
-    --output_dir outputs/probes_test_1_5_1 \
-    --num_epochs 80
+```bash
+# Phase 1：识别安全神经元与效用神经元
+python scripts/pipeline/run_safety_identifier_salad.py --output_dir outputs/neurons
+python scripts/pipeline/run_utility_identifier.py --output_dir outputs/neurons
 
-# 使用预提取的隐藏态缓存（更快）
-python scripts/extract_hidden_states.py \
+# Phase 2：激活投影与参数对齐
+python scripts/pipeline/run_activation_projection.py --output_dir outputs/neurons
+python scripts/pipeline/run_parameter_alignment.py --output_dir outputs/neurons
+
+# Phase 3：象限分类与专用安全神经元计算
+python scripts/pipeline/run_quadrant_classification.py --output_dir outputs/neurons
+python scripts/pipeline/compute_dedicated_safety_neurons.py --output_dir outputs/neurons
+
+# Phase 4（可选）：TSFT 微调
+python scripts/finetuning/run_tsft_finetuning.py \
+    --output_dir outputs/tsft_finetuning
+
+# Phase 5：评估
+python scripts/evaluation/run_evaluate_asr.py --output_dir outputs/asr
+python scripts/evaluation/evaluate_utility.py --output_dir outputs/utility
+```
+
+### 5. 准备数据集
+
+```bash
+# SALAD-Bench（越狱攻击评估数据集）
+python scripts/data/download_salad.py
+
+# 效用基准（ARC、HellaSwag 等）
+python scripts/data/download_utility_datasets.py
+
+# 预提取隐藏状态缓存（加速后续探针训练）
+python scripts/data/extract_hidden_states.py \
     --data_file data/salad/raw/base_evaluation.jsonl \
     --max_samples 8000 \
     --output outputs/hidden_states_cache/cache.npz
+```
 
-python scripts/train_linear_probes.py \
+### 6. 训练线性探针
+
+```bash
+# 平衡线性探针（推荐）
+python scripts/probes/linear_probe_balanced.py \
     --hidden_states_cache outputs/hidden_states_cache/cache.npz \
-    --output_dir outputs/probes
+    --output_dir outputs/linear_probes
+
+# 使用 SNIP 离线评分选择神经元
+python scripts/probes/offline_snip_compute.py --output_dir outputs/snip
+python scripts/probes/offline_snip_select.py \
+    --snip_dir outputs/snip \
+    --output_dir outputs/neurons
 ```
 
-详细说明请参考 [探针训练逻辑](docs/探针训练逻辑.md)。
-
-#### IO 测试
+### 7. SALAD-Bench 评估
 
 ```bash
-python scripts/run_io_tests.py
-```
-
-### 6. 启动可视化系统
-
-#### 本地运行
-
-```bash
-# 启动后端 (端口 8000)
-cd visualization/backend
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-
-# 启动前端 (端口 5173)
-cd visualization/frontend
-npm run dev
-```
-
-访问 http://localhost:5173 查看可视化界面。
-
-#### Docker 容器内运行
-
-```bash
-# 进入容器
-docker exec -it neurobreak-container /bin/bash
-
-# 在容器内启动后端服务
-cd /workspace/visualization/backend
-pip install -r requirements.txt
-python main.py &
-
-# 容器端口映射（启动容器时需要）
-# docker run -it --gpus all -p 8000:8000 -p 5173:5173 neurolens:latest
-```
-
-或使用 PowerShell 脚本（Windows）：
-
-```powershell
-# 启动容器并映射端口
-docker run -it --gpus all -p 8000:8000 -p 5173:5173 -v ${PWD}:/workspace neurolens:latest
-
-# 进入容器后
-docker exec -it neurobreak-container /bin/bash
-cd /workspace/visualization/backend
-python main.py
-```
-
-**注意**：
-- 后端服务默认运行在 `http://localhost:8000`
-- 前端需要单独运行或通过代理访问
-- 确保容器端口已正确映射
-
-## 🐳 Docker 部署
-
-### 构建镜像
-
-```bash
-docker build -t neurolens:v1 -f docker/Dockerfile .
-```
-
-### 运行容器
-
-```bash
-docker run -it --gpus all \
-  -v /path/to/models:/workspace/ms_models \
-  -e MODELSCOPE_TOKEN=your_token \
-  neurolens:latest
-```
-
-**注意**：
-- 模型路径已更新为 `/workspace/ms_models`，请确保正确挂载模型目录
-- 推荐使用 ModelScope token（`MODELSCOPE_TOKEN`），中国大陆访问速度更快
-- 如果使用 HuggingFace，可设置 `HF_TOKEN` 环境变量
-
-详细部署指南请参考 [DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)。
-
-## 📁 项目结构
-
-```
-NeuroLens/
-├── engine/                 # 核心引擎
-│   ├── models.py          # 模型管理模块
-│   ├── assessment/        # 评估模块
-│   │   ├── evaluate.py    # 评估逻辑
-│   │   └── report.py     # 报告生成
-│   ├── probes/           # 探针模块
-│   │   └── linear_probe.py
-│   └── engine/            # 引擎核心
-├── scripts/               # 工具脚本
-│   ├── download_models.py    # 模型下载脚本
-│   ├── evaluate_salad_pipeline.py  # SALAD 评估脚本
-│   ├── train_linear_probes.py      # 线性探针训练脚本
-│   ├── train_622_full.py           # 6:2:2划分 + 过采样训练脚本
-│   ├── train_test_1_5_1.py         # 6:2:2划分 + 测试集评估脚本
-│   ├── extract_hidden_states.py    # 隐藏态提取脚本
-│   ├── analyze_salad_results.py     # SALAD 结果分析脚本
-│   └── ...
-├── visualization/         # 可视化系统
-│   ├── frontend/         # 前端应用
-│   │   ├── src/
-│   │   │   ├── components/  # 视图组件
-│   │   │   │   ├── ControlPanel.tsx     # 控制面板
-│   │   │   │   ├── MetricView.tsx       # 指标视图
-│   │   │   │   ├── RepresentationView.tsx  # 表征视图
-│   │   │   │   ├── LayerView.tsx        # 层视图
-│   │   │   │   ├── NeuronView.tsx      # 神经元视图
-│   │   │   │   └── InstanceView.tsx    # 实例视图
-│   │   │   ├── services/    # API 服务
-│   │   │   ├── store/       # 状态管理
-│   │   │   └── types/       # 类型定义
-│   │   └── package.json
-│   ├── backend/          # 后端 API
-│   │   ├── main.py
-│   │   └── requirements.txt
-│   └── README.md
-├── docs/                 # 文档目录
-│   ├── DEPLOYMENT_GUIDE.md       # 部署指南
-│   ├── SALAD_EVALUATION_GUIDE.md # SALAD 评估指南
-│   ├── SALAD_EVALUATION_ANALYSIS.md  # SALAD 评估分析报告
-│   ├── 探针训练逻辑.md            # 线性探针训练详细说明
-│   └── ...
-├── data/                 # 数据目录
-│   └── salad/            # SALAD-Bench 数据集
-├── ms_models/            # 模型文件目录
-│   ├── LLM-Research/
-│   │   ├── Meta-Llama-3-8B-Instruct/
-│   │   └── Llama-Guard-3-8B/
-├── docker/               # Docker 配置
-│   └── Dockerfile
-├── configs/              # 配置文件
-│   └── runtime/
-├── logs/                 # 日志和评估结果
-├── outputs/              # 训练输出
-├── requirements.txt      # Python 依赖
-└── README.md            # 本文件
-```
-
-## 📚 文档
-
-- [部署指南](docs/DEPLOYMENT_GUIDE.md) - 详细部署说明
-- [模型适配总结](docs/MODEL_ADAPTATION_SUMMARY.md) - 模型配置说明
-- [SALAD 评估指南](docs/SALAD_EVALUATION_GUIDE.md) - SALAD-Bench 数据集评估指南
-- [SALAD 评估分析](docs/SALAD_EVALUATION_ANALYSIS.md) - SALAD 评估结果分析报告
-- [探针训练逻辑](docs/探针训练逻辑.md) - 线性探针训练详细说明
-- [数据集划分用途详解](docs/数据集划分用途详解.md) - 数据划分策略说明
-
-## 🧪 测试与评估
-
-### IO 测试
-
-```bash
-python scripts/run_io_tests.py
-```
-
-### SALAD-Bench 评估
-
-运行 SALAD-Bench 数据集评估（需要先下载数据集）：
-
-```bash
-# 在 Docker 容器内运行
-docker exec -it neurolens /bin/bash
-cd /workspace
-python scripts/evaluate_salad_pipeline.py \
-    --data_dir /workspace/data/salad/raw \
-    --output /workspace/logs/salad_evaluation.jsonl \
+python scripts/evaluation/evaluate_salad_pipeline.py \
+    --data_dir data/salad/raw \
+    --output logs/salad_evaluation.jsonl \
     --config base_set \
-    --max_samples 100
-```
-
-或使用 PowerShell 脚本（Windows）：
-
-```powershell
-.\scripts\run_salad_evaluation.ps1 -Config base_set -MaxSamples 100
+    --max_samples 500
 ```
 
 **支持的配置**：
-- `base_set`: 基础数据集（21,318 样本）
-- `attack_enhanced_set`: 攻击增强集（5,000 样本）
-- `defense_enhanced_set`: 防御增强集（200 样本）
-- `mcq_set`: 多选题集（3,840 样本）
+- `base_set`：基础数据集（21,318 样本）
+- `attack_enhanced_set`：攻击增强集（5,000 样本）
+- `defense_enhanced_set`：防御增强集（200 样本）
+- `mcq_set`：多选题集（3,840 样本）
 
-详细说明请参考 [SALAD 评估指南](docs/SALAD_EVALUATION_GUIDE.md)。
-
-### 分析评估结果
-
-分析 SALAD 评估结果：
+### 8. 启动可视化系统
 
 ```bash
-python scripts/analyze_salad_results.py
+cd visualization/backend
+uvicorn main:app --host 0.0.0.0 --port 6008
 ```
 
-## 🔧 开发
+访问 `http://localhost:6008` 查看交互式仪表盘。
 
-### 代码格式化
+面板均内置默认数据，无需预先生成 `outputs/` 即可渲染预览；接入真实输出后自动切换为实验数据。
+
+| 面板 | 路径 | 功能 |
+|------|------|------|
+| A 控制面板 | `/vis/panel_A_control.html` | 微调 / 管线 / ASR 任务触发，实时日志流 |
+| B 指标 | `/vis/panel_B_metric.html` | ASR / Utility 核心指标雷达图 |
+| C 表征 | `/vis/panel_C_representation.html` | 隐藏态 t-SNE/PCA 散点 |
+| D 层演化 | `/vis/panel_D_layer.html` | 层间安全特征演化与梯度依赖 |
+| E 神经元 | `/vis/panel_E_neuron.html` | 四象限神经元分类（D3 连接图） |
+| F 热图 | `/vis/panel_F_heatmap.html` | 跨层相似度热力图 |
+| G Sankey | `/vis/panel_G_sankey.html` | 攻击路径追溯桑基图 |
+| H 小提琴 | `/vis/panel_H_violin.html` | 神经元激活分布 |
+| K 实例 | `/vis/panel_K_instance.html` | 专用安全神经元与样本实例详情 |
+
+**可选：React 开发模式**（仅二次开发时需要）
 
 ```bash
-# Python
+cd visualization/frontend
+npm install
+npm run dev  # http://localhost:6006，/api 请求代理到 :6008
+```
+
+## 项目结构
+
+```
+NeuroLens/
+├── engine/                     核心库（被 scripts/ 和 visualization/ 共同调用）
+│   ├── models.py               模型加载（AutoModelForCausalLM，支持 4-bit 量化）
+│   ├── server.py               FastAPI 推理服务端点
+│   ├── assessment/             评估管线（SALAD 评估、效用评估、报告生成）
+│   ├── neurons/                神经元分析算法
+│   │   ├── snip_scorer.py          SNIP 重要性评分
+│   │   ├── safety_identifier.py    安全神经元识别 S(q)
+│   │   ├── utility_identifier.py   效用神经元识别 U(p)
+│   │   ├── activation_projection.py
+│   │   ├── parameter_alignment.py
+│   │   ├── quadrant_classification.py
+│   │   └── gradient_dependency.py
+│   ├── probes/                 线性探针（基础版 + 平衡准确率版）
+│   └── fine_tuning/            TSFT / VA-TSFT 微调实现
+│
+├── scripts/                    研究脚本（按功能分 8 个子目录）
+│   ├── pipeline/               核心管线入口（run_neurobreak_pipeline.py 等）
+│   ├── evaluation/             评估脚本（SALAD、ASR、Utility）
+│   ├── data/                   数据下载与预处理
+│   ├── finetuning/             微调训练与 delta 应用
+│   ├── probes/                 探针训练与 SNIP 离线计算
+│   ├── reporting/              报告与可视化数据生成
+│   ├── analysis/               结果统计分析
+│   └── tools/                  工具脚本（GPU 诊断、模型检查等）
+│
+├── visualization/              可视化系统
+│   ├── backend/                FastAPI 服务（主入口，port 6008）
+│   │   ├── main.py             API + 静态文件托管 + subprocess task runner
+│   │   ├── index.html          仪表盘主页（9 个 panel 的 iframe 容器）
+│   │   └── vis/                panel_A ~ panel_K HTML 文件
+│   └── frontend/               React 18 + TypeScript SPA（开发用，port 6006）
+│       ├── src/components/     视图组件（与面板对应）
+│       ├── src/services/       API 客户端
+│       ├── src/store/          Zustand 全局状态
+│       └── vite.config.ts      dev: port 6006，proxy /api → :6008
+│
+├── configs/runtime/            运行时配置（YAML、.env）
+├── data/                       数据集（SALAD、Alpaca、Utility 基准）
+├── outputs/                    实验产物（神经元 JSON、探针权重、ASR 日志等）
+├── ms_models/                  预训练模型缓存
+├── docs/                       项目文档
+├── requirements.txt
+└── README.md
+```
+
+## 环境要求
+
+- Python 3.9+
+- PyTorch 2.0+，CUDA 12.0+（推荐 NVIDIA GPU，16GB+ VRAM）
+- Node.js 18+（仅可视化开发时需要）
+
+## 开发
+
+```bash
+# 代码格式化
 black .
 isort .
 ruff check .
+
+# GPU 环境诊断
+python scripts/tools/check_gpu.py
+
+# 模型路径检查
+python scripts/tools/check_models.py
+
+# 快速推理测试
+python scripts/tools/test_models.py
 ```
 
-### 检查模型
+## 文档
 
-```bash
-python scripts/check_models.py
-```
+- [模块 API 参考](docs/module_api_reference.md)
+- [神经元分析教程](docs/engine_neurons_tutorial.md)
+- [微调流程说明](docs/fine_tuning_tutorial.md)
+- [SALAD 评估指南](docs/SALAD_EVALUATION_GUIDE.md)
+- [探针训练逻辑](docs/探针训练逻辑.md)
+- [outputs/ 产物说明](docs/outputs_summary.md)
 
-## ⚠️ 注意事项
+## 致谢
 
-1. **模型访问权限**：需要申请 Meta Llama 和 Llama Guard 模型的访问权限
-   - ModelScope（推荐）：访问 https://modelscope.cn 申请模型权限
-   - HuggingFace：访问 https://huggingface.co 申请模型权限
-2. **模型路径**：模型默认路径为 `/workspace/ms_models`（容器内）或 `ms_models/`（本地）
-3. **模型下载**：推荐使用 ModelScope 下载模型，中国大陆访问速度更快
-4. **GPU 推荐**：8B 模型需要 GPU 支持，建议使用 NVIDIA GPU（16GB+ VRAM）
-5. **首次加载**：8B 模型首次加载需要较长时间，这是正常现象
-6. **内存要求**：建议至少 32GB RAM，使用 GPU 时建议 16GB+ VRAM（8B 模型）
-7. **网络要求**：首次运行需要下载模型（约 16GB+），使用 ModelScope 可加速下载
-8. **SALAD 评估**：运行 SALAD 评估前需要先下载 SALAD-Bench 数据集
+- [NeuroBreak](https://arxiv.org/abs/2502.07407) — 本项目所实现的研究论文
+- [SALAD-Bench](https://github.com/OpenSafetyLab/SALAD-Bench) — 越狱攻击评估数据集
+- [HuggingFace Transformers](https://huggingface.co/docs/transformers) — 模型加载与推理
+- [ModelScope](https://modelscope.cn/) — 中国大陆模型托管
 
-## 🤝 贡献
+## 许可证
 
-欢迎提交 Issue 和 Pull Request！
-
-## 📄 许可证
-
-本项目遵循相应的开源许可证。使用 Meta Llama 模型需要遵守 [Llama 使用条款](https://ai.meta.com/llama/use-policy/)。
-
-## 🙏 致谢
-
-- [Meta Llama](https://ai.meta.com/llama/) - 提供强大的语言模型
-- [ModelScope](https://modelscope.cn/) - 模型托管平台（中国大陆推荐）
-- [HuggingFace](https://huggingface.co/) - 模型托管和 Transformers 库
-- [SALAD-Bench](https://github.com/facebookresearch/SALAD-Bench) - 安全评估数据集
-
-## 📮 联系方式
-
-如有问题或建议，请通过 GitHub Issues 联系。
+本项目代码遵循 MIT 许可证。使用 Llama 系列模型需遵守 [Meta Llama 使用条款](https://ai.meta.com/llama/use-policy/)。
 
 ---
 
-**⭐ 如果这个项目对你有帮助，请给个 Star！**
+如有问题或建议，请通过 [GitHub Issues](https://github.com/YANHAN-BLCU/NeuroLens/issues) 联系。

@@ -1,7 +1,7 @@
 // Neuron View Component - Network Visualization with Cytoscape.js
 
 import React, { useEffect, useRef, useState } from 'react';
-import cytoscape, { Core, Stylesheet } from 'cytoscape';
+import cytoscape, { Core } from 'cytoscape';
 import {
   Box,
   Typography,
@@ -133,7 +133,7 @@ export const NeuronView: React.FC = () => {
             'border-color': '#000',
           },
         },
-      ] as Stylesheet[],
+      ] as unknown as cytoscape.StylesheetCSS[],
       layout: {
         name: 'concentric',
         concentric: (node: any) => -node.data('layer'),

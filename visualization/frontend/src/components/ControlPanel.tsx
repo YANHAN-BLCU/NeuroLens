@@ -18,7 +18,6 @@ import {
   Radio,
   Button,
   Divider,
-  Chip,
   Stack,
   Alert,
   CircularProgress,
@@ -26,7 +25,6 @@ import {
 import {
   PlayArrow as PlayIcon,
   AutoFixHigh as TuneIcon,
-  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 
 import { useStore, AVAILABLE_MODELS, AVAILABLE_ATTACKS } from '../store';

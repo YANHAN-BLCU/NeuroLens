@@ -3,8 +3,13 @@ NeuroLens Visualization Backend
 FastAPI server for serving visualization data
 """
 
+import subprocess
+import threading
+import uuid as _uuid
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import json
@@ -27,8 +32,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+_BACKEND_DIR = os.path.dirname(__file__)
+
+# Serve index.html at root
+@app.get("/")
+async def serve_index():
+    return FileResponse(os.path.join(_BACKEND_DIR, "index.html"))
+
+# Serve vis/ panel files
+app.mount("/vis", StaticFiles(directory=os.path.join(_BACKEND_DIR, "vis")), name="vis")
+
 # Constants
-DATA_ROOT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "outputs", "outputs")
+def _resolve_data_root() -> str:
+    """Resolve outputs directory: env var > app_config.json > default relative path."""
+    env_val = os.getenv("NEUROLENS_OUTPUTS_DIR")
+    if env_val and os.path.isdir(env_val):
+        return env_val
+
+    config_path = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "configs", "runtime", "app_config.json")
+    )
+    try:
+        if os.path.exists(config_path):
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            outputs_dir = cfg.get("outputs_dir", "")
+            if outputs_dir and os.path.isdir(outputs_dir):
+                return outputs_dir
+    except Exception:
+        pass
+
+    # Fallback: original relative path
+    return os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "outputs"))
+
+DATA_ROOT = _resolve_data_root()
 AVAILABLE_LAYERS = [0, 5, 10, 15, 20, 25, 30, 31]
 
 # ============= Pydantic Models =============
@@ -805,9 +842,153 @@ async def get_data_summary():
     
     return summary
 
+# ============= Task Runner (subprocess-based) =============
+
+_PROJECT_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_tasks: Dict[str, Dict] = {}  # task_id -> {status, log, proc}
+
+def _run_task(task_id: str, cmd: list, cwd: str):
+    """Run a subprocess task and stream output into _tasks[task_id]['log']."""
+    entry = _tasks[task_id]
+    entry["status"] = "running"
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=cwd,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1
+        )
+        entry["proc"] = proc
+        for line in proc.stdout:
+            entry["log"].append(line.rstrip())
+        proc.wait()
+        entry["returncode"] = proc.returncode
+        entry["status"] = "completed" if proc.returncode == 0 else "failed"
+    except Exception as e:
+        entry["log"].append(f"[error] {e}")
+        entry["status"] = "failed"
+
+
+class FinetuneRunRequest(BaseModel):
+    model_path: str
+    evaluation_log: str
+    safety_neurons: str
+    output: str
+    num_epochs: int = 3
+    batch_size: int = 4
+    learning_rate: float = 5e-5
+    save_only_delta: bool = True
+    bf16: bool = True
+
+
+class PipelineRunRequest(BaseModel):
+    model_path: str
+    salad_data: str = "data/salad"
+    alpaca_data: str = "data/alpaca/alpaca_data.jsonl"
+    output: str = "outputs/neurobreak_pipeline"
+    from_phase: int = 0
+    safety_threshold_q: float = 0.005
+    utility_threshold_p: float = 0.01
+    num_epochs: int = 3
+    bf16: bool = True
+
+
+class ASRRunRequest(BaseModel):
+    model_path: str
+    classifier_path: str
+    output: str = "outputs/asr_results.jsonl"
+    max_samples: Optional[int] = None
+
+
+@app.post("/api/tasks/finetune")
+async def task_finetune(req: FinetuneRunRequest):
+    task_id = str(_uuid.uuid4())
+    cmd = [
+        "python", "scripts/finetuning/run_tsft_finetuning.py",
+        "--model-path", req.model_path,
+        "--evaluation-log", req.evaluation_log,
+        "--safety-neurons", req.safety_neurons,
+        "--output", req.output,
+        "--num-epochs", str(req.num_epochs),
+        "--batch-size", str(req.batch_size),
+        "--learning-rate", str(req.learning_rate),
+        "--save-only-delta", str(req.save_only_delta),
+    ]
+    if req.bf16:
+        cmd.append("--bf16")
+    _tasks[task_id] = {"status": "pending", "log": [], "proc": None, "type": "finetune"}
+    t = threading.Thread(target=_run_task, args=(task_id, cmd, _PROJECT_ROOT), daemon=True)
+    t.start()
+    return {"task_id": task_id, "status": "pending"}
+
+
+@app.post("/api/tasks/pipeline")
+async def task_pipeline(req: PipelineRunRequest):
+    task_id = str(_uuid.uuid4())
+    cmd = [
+        "python", "scripts/pipeline/run_neurobreak_pipeline.py",
+        "--model-path", req.model_path,
+        "--salad-data", req.salad_data,
+        "--alpaca-data", req.alpaca_data,
+        "--output", req.output,
+        "--from-phase", str(req.from_phase),
+        "--safety-threshold-q", str(req.safety_threshold_q),
+        "--utility-threshold-p", str(req.utility_threshold_p),
+        "--num-epochs", str(req.num_epochs),
+    ]
+    if req.bf16:
+        cmd.append("--bf16")
+    _tasks[task_id] = {"status": "pending", "log": [], "proc": None, "type": "pipeline"}
+    t = threading.Thread(target=_run_task, args=(task_id, cmd, _PROJECT_ROOT), daemon=True)
+    t.start()
+    return {"task_id": task_id, "status": "pending"}
+
+
+@app.post("/api/tasks/asr")
+async def task_asr(req: ASRRunRequest):
+    task_id = str(_uuid.uuid4())
+    cmd = [
+        "python", "scripts/evaluation/run_evaluate_asr.py",
+        "--model", req.model_path,
+        "--classifier", req.classifier_path,
+        "--output", req.output,
+    ]
+    if req.max_samples:
+        cmd += ["--max-samples", str(req.max_samples)]
+    _tasks[task_id] = {"status": "pending", "log": [], "proc": None, "type": "asr"}
+    t = threading.Thread(target=_run_task, args=(task_id, cmd, _PROJECT_ROOT), daemon=True)
+    t.start()
+    return {"task_id": task_id, "status": "pending"}
+
+
+@app.get("/api/tasks/{task_id}")
+async def get_task(task_id: str, log_offset: int = 0):
+    if task_id not in _tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    entry = _tasks[task_id]
+    log_slice = entry["log"][log_offset:]
+    return {
+        "task_id": task_id,
+        "status": entry["status"],
+        "type": entry.get("type"),
+        "returncode": entry.get("returncode"),
+        "log": log_slice,
+        "log_total": len(entry["log"]),
+    }
+
+
+@app.delete("/api/tasks/{task_id}")
+async def cancel_task(task_id: str):
+    if task_id not in _tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    proc = _tasks[task_id].get("proc")
+    if proc and proc.poll() is None:
+        proc.terminate()
+    _tasks[task_id]["status"] = "cancelled"
+    return {"task_id": task_id, "status": "cancelled"}
+
+
 # ============= Main Entry Point =============
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

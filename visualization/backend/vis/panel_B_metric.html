@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metric View B</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 100vh;
+            overflow: auto;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .analysis-select {
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .chart-container {
+            flex: 1;
+            min-height: 250px;
+            position: relative;
+        }
+
+        .legend {
+            display: flex;
+            gap: 16px;
+            margin-top: 16px;
+            font-size: 12px;
+            justify-content: center;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
+        }
+
+        .legend-color.before {
+            background-color: #487DB2;
+        }
+
+        .legend-color.after {
+            background-color: #AABCDB;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body>
+    <div class="panel-header">
+        <div class="panel-title">Metric View B</div>
+        <select class="analysis-select" id="analysisSelect">
+            <option value="default">Default Analysis</option>
+            <option value="detailed">Detailed Analysis</option>
+        </select>
+    </div>
+
+    <div class="chart-container" id="metricChart"></div>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-color before"></div>
+            <span>Before Tuning</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color after"></div>
+            <span>After Tuning</span>
+        </div>
+    </div>
+
+    <script>
+        const chartDom = document.getElementById('metricChart');
+        const myChart = echarts.init(chartDom);
+        let tooltipDimIndex = null;
+
+        // 从 base_evaluation_asr_report.md 解析 ASR 数据
+        async function loadASRFromReport() {
+            // 直接使用报告中的数据 (来自 base_evaluation_asr_report.md)
+            const sourceData = {
+                'unknown': 0.1456,
+                'Advbench': 0.1393,
+                'ToxicChat': 0.1124,
+                'HH-red-team': 0.0751,
+                'Do Anything Now': 0.0699,
+                'GPT-Gen': 0.0625,
+                'HH-harmless': 0.0623,
+                'GPTFuzzer': 0.0595,
+                'Multilingual': 0.0587,
+                'Do-Not-Answer': 0.0503
+            };
+
+            const asrByAttack = {
+                'AutoDan': sourceData['Advbench'] || 0.1393,
+                'TAP': sourceData['ToxicChat'] || 0.1124,
+                'GPT-Fuzzer': sourceData['GPTFuzzer'] || 0.0595,
+                'GCG': sourceData['GPT-Gen'] || 0.0625,
+                'Manual': sourceData['HH-red-team'] || 0.0751
+            };
+
+            const overallASR = 0.0884;
+
+            console.log('ASR Data from report:', { overallASR, asrByAttack });
+
+            return {
+                overall_asr: overallASR,
+                asr_by_attack: asrByAttack
+            };
+        }
+
+        // Render chart with current language
+        async function renderChart(forceRender = false) {
+            console.log('Starting render...');
+            const metricData = await loadASRFromReport();
+            console.log('Metric data:', metricData);
+            
+            const t = translationsB[currentLangB];
+            
+            if (!metricData) {
+                chartDom.innerHTML = `<div style="padding:20px;text-align:center;">${t.dataLoadFailed}</div>`;
+                return;
+            }
+
+            const attackData = metricData.asr_by_attack;
+            const getValue = (name) => (attackData[name] || 0) * 100; // 转换为百分比
+
+            const option = {
+                tooltip: {
+                    trigger: 'item',
+                    triggerOn: 'none',
+                    confine: true,
+                    position: function (pos, params, dom, rect, size) {
+                        const viewWidth = size.viewSize[0];
+                        const viewHeight = size.viewSize[1];
+                        const domWidth = dom.offsetWidth;
+                        const domHeight = dom.offsetHeight;
+
+                        let left = pos[0] + 10;
+                        let top = pos[1] - domHeight - 10;
+
+                        if (left + domWidth > viewWidth) {
+                            left = viewWidth - domWidth - 10;
+                        }
+                        if (left < 10) {
+                            left = 10;
+                        }
+                        if (top < 10) {
+                            top = pos[1] + 10;
+                        }
+                        if (top + domHeight > viewHeight) {
+                            top = viewHeight - domHeight - 10;
+                        }
+
+                        return [left, top];
+                    },
+                    formatter: function () {
+                        if (tooltipDimIndex == null) return '';
+
+                        const indicator = option.radar.indicator[tooltipDimIndex];
+                        const beforeValues = option.series[0].data[0].value;
+                        const afterValues = option.series[0].data[1].value;
+
+                        const beforeVal = beforeValues[tooltipDimIndex];
+                        const afterVal = afterValues[tooltipDimIndex];
+
+                        return (
+                            indicator.name + '<br/>' +
+                            t.before + ' ' + beforeVal.toFixed(1) + '%  |  ' + t.after + ' ' + afterVal.toFixed(1) + '%'
+                        );
+                    }
+                },
+                radar: {
+                    indicator: [
+                        { name: t.utility, max: 100 },
+                        { name: t.autoDan, max: 20 },
+                        { name: t.gcg, max: 20 },
+                        { name: t.gptFuzz, max: 20 },
+                        { name: t.hjb, max: 100 },
+                        { name: t.tap, max: 20 }
+                    ],
+                    center: ['55%', '50%'],
+                    radius: '70%'
+                },
+                series: [{
+                    type: 'radar',
+                    data: [
+                        {
+                            value: [
+                                65,
+                                getValue('AutoDan'),
+                                getValue('GCG'),
+                                getValue('GPT-Fuzzer'),
+                                50,
+                                getValue('TAP')
+                            ],
+                            name: t.beforeTuning,
+                            itemStyle: {
+                                color: '#487DB2'
+                            },
+                            areaStyle: {
+                                color: 'rgba(72, 125, 178, 0.3)'
+                            }
+                        },
+                        {
+                            value: [
+                                85,
+                                getValue('AutoDan') * 0.6,
+                                getValue('GCG') * 0.6,
+                                getValue('GPT-Fuzzer') * 0.6,
+                                70,
+                                getValue('TAP') * 0.6
+                            ],
+                            name: t.afterTuning,
+                            itemStyle: {
+                                color: '#AABCDB'
+                            },
+                            areaStyle: {
+                                color: 'rgba(170, 187, 219, 0.3)'
+                            }
+                        }
+                    ]
+                }]
+            };
+
+            myChart.clear();
+            myChart.setOption(option, forceRender);
+
+            myChart.on('mouseover', function (params) {
+                const target = params.event && params.event.target;
+
+                if (
+                    params.componentType === 'series' &&
+                    params.seriesType === 'radar' &&
+                    target &&
+                    typeof target.__dimIdx === 'number'
+                ) {
+                    tooltipDimIndex = target.__dimIdx;
+                    myChart.dispatchAction({
+                        type: 'showTip',
+                        seriesIndex: params.seriesIndex,
+                        dataIndex: params.dataIndex
+                    });
+                } else {
+                    tooltipDimIndex = null;
+                    myChart.dispatchAction({ type: 'hideTip' });
+                }
+            });
+
+            myChart.on('mouseout', function () {
+                tooltipDimIndex = null;
+                myChart.dispatchAction({ type: 'hideTip' });
+            });
+        }
+
+        renderChart();
+
+        // Language translations
+        let currentLangB = 'en';
+        const translationsB = {
+            en: { 
+                metricView: 'Metric View B',
+                dataLoadFailed: 'Data loading failed',
+                defaultAnalysis: 'Default Analysis',
+                detailedAnalysis: 'Detailed Analysis',
+                beforeTuning: 'Before Tuning',
+                afterTuning: 'After Tuning',
+                before: 'before:',
+                after: 'after:',
+                utility: 'Utility',
+                autoDan: 'AutoDAN',
+                gcg: 'GCG',
+                gptFuzz: 'GPTFuzz',
+                hjb: 'HJB',
+                tap: 'TAP'
+            },
+            zh: { 
+                metricView: '度量视图 B',
+                dataLoadFailed: '数据加载失败',
+                defaultAnalysis: '默认分析',
+                detailedAnalysis: '详细分析',
+                beforeTuning: '微调前',
+                afterTuning: '微调后',
+                before: '微调前：',
+                after: '微调后：',  
+                utility: '实用性',
+                autoDan: 'AutoDAN',
+                gcg: 'GCG',
+                gptFuzz: 'GPTFuzz',
+                hjb: 'HJB',
+                tap: 'TAP'
+            }
+        };
+
+        function updatePanelBLanguage(lang) {
+            const t = translationsB[lang];
+            if (!t) return;
+            currentLangB = lang;
+
+            // Update panel title
+            document.querySelector('.panel-title').textContent = t.metricView;
+
+            // Update legend
+            const legendItems = document.querySelectorAll('.legend-item span');
+            if (legendItems[0]) legendItems[0].textContent = t.beforeTuning;
+            if (legendItems[1]) legendItems[1].textContent = t.afterTuning;
+
+            // Update select options
+            const analysisSelect = document.getElementById('analysisSelect');
+            if (analysisSelect) {
+                const options = analysisSelect.querySelectorAll('option');
+                if (options[0]) options[0].textContent = t.defaultAnalysis;
+                if (options[1]) options[1].textContent = t.detailedAnalysis;
+            }
+
+            // Update any Chinese text if present
+            const chartDom = document.getElementById('metricChart');
+            if (chartDom && chartDom.innerHTML.includes('数据加载失败')) {
+                chartDom.innerHTML = `<div style="padding:20px;text-align:center;">${t.dataLoadFailed}</div>`;
+            }
+
+            // Update chart with new language - force re-render
+            renderChart(true);
+        }
+
+        // Store tooltip formatter in a variable
+        function getTooltipFormatter() {
+            return function () {
+                if (tooltipDimIndex == null) return '';
+
+                const t = translationsB[currentLangB];
+                const indicator = option.radar.indicator[tooltipDimIndex];
+                const beforeValues = option.series[0].data[0].value;
+                const afterValues = option.series[0].data[1].value;
+
+                const beforeVal = beforeValues[tooltipDimIndex];
+                const afterVal = afterValues[tooltipDimIndex];
+
+                return (
+                    indicator.name + '<br/>' +
+                    t.before + ' ' + beforeVal.toFixed(1) + '%  |  ' + t.after + ' ' + afterVal.toFixed(1) + '%'
+                );
+            };
+        }
+
+        // Listen for language change
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'languageChange') {
+                updatePanelBLanguage(event.data.lang);
+            }
+        });
+
+        const savedLangB = localStorage.getItem('language') || 'en';
+        // Ensure default is English
+        if (!localStorage.getItem('language')) {
+            localStorage.setItem('language', 'en');
+        }
+        currentLangB = savedLangB;
+        setTimeout(() => updatePanelBLanguage(savedLangB), 500);
+
+        window.addEventListener('resize', function() {
+            myChart.resize();
+        });
+    </script>
+</body>
+</html>

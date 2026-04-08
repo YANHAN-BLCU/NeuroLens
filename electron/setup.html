@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuroLens — 初始配置</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .logo {
+    font-size: 26px;
+    font-weight: 700;
+    color: #60a5fa;
+    margin-bottom: 4px;
+    letter-spacing: -0.5px;
+  }
+  .tagline {
+    font-size: 13px;
+    color: #64748b;
+    margin-bottom: 32px;
+  }
+
+  .card {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 28px 32px;
+    width: 100%;
+    max-width: 500px;
+  }
+
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .step-badge {
+    background: #1d4ed8;
+    color: #bfdbfe;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .step-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f1f5f9;
+  }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-size: 13px;
+    color: #94a3b8;
+    margin-bottom: 6px;
+  }
+  .field-row {
+    display: flex;
+    gap: 8px;
+  }
+  .field-row input {
+    flex: 1;
+  }
+
+  input[type="text"], input[type="number"] {
+    width: 100%;
+    background: #0f1117;
+    border: 1px solid #334155;
+    border-radius: 7px;
+    padding: 9px 12px;
+    color: #e2e8f0;
+    font-size: 13px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    transition: border-color 0.15s;
+  }
+  input:focus {
+    outline: none;
+    border-color: #3b82f6;
+  }
+  input::placeholder { color: #475569; }
+
+  .btn-browse {
+    background: #1e40af;
+    color: #bfdbfe;
+    border: none;
+    border-radius: 7px;
+    padding: 9px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+  .btn-browse:hover { background: #2563eb; }
+
+  .hint {
+    font-size: 12px;
+    color: #475569;
+    margin-top: 4px;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid #1e293b;
+    margin: 20px 0;
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 24px;
+  }
+  .btn-primary {
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 28px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-primary:disabled { background: #1e3a5f; color: #475569; cursor: not-allowed; }
+
+  .error-msg {
+    color: #f87171;
+    font-size: 12px;
+    margin-top: 6px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="logo">NeuroLens</div>
+<div class="tagline">LLM Safety Neuron Analysis Platform</div>
+
+<div class="card">
+  <div class="step-header">
+    <span class="step-badge">初始配置</span>
+    <span class="step-title">配置模型与工作目录</span>
+  </div>
+
+  <!-- LLM Model Path -->
+  <div class="field">
+    <label>LLM 模型目录（Meta-Llama-3-8B-Instruct）</label>
+    <div class="field-row">
+      <input type="text" id="llm_path" placeholder="例：C:\models\Meta-Llama-3-8B-Instruct">
+      <button class="btn-browse" onclick="browse('llm_path')">浏览</button>
+    </div>
+    <div class="hint">包含 config.json 和 model.safetensors 的目录</div>
+    <div class="error-msg" id="err_llm">请选择 LLM 模型目录</div>
+  </div>
+
+  <!-- Guard Model Path -->
+  <div class="field">
+    <label>Guard 模型目录（Llama-Guard-3-8B）</label>
+    <div class="field-row">
+      <input type="text" id="guard_path" placeholder="例：C:\models\Llama-Guard-3-8B">
+      <button class="btn-browse" onclick="browse('guard_path')">浏览</button>
+    </div>
+    <div class="hint">安全分类器模型目录</div>
+    <div class="error-msg" id="err_guard">请选择 Guard 模型目录</div>
+  </div>
+
+  <!-- Outputs Directory -->
+  <div class="field">
+    <label>工作输出目录（用于存储分析结果）</label>
+    <div class="field-row">
+      <input type="text" id="outputs_dir" placeholder="例：C:\Users\你的用户名\neurolens-outputs">
+      <button class="btn-browse" onclick="browse('outputs_dir')">浏览</button>
+    </div>
+    <div class="hint">存放神经元分析、探针训练等输出文件的目录，需要较大磁盘空间</div>
+    <div class="error-msg" id="err_outputs">请选择输出目录</div>
+  </div>
+
+  <!-- GPU Device -->
+  <div class="field">
+    <label>GPU 设备编号</label>
+    <input type="number" id="cuda_device" value="0" min="0" max="7" style="width:80px">
+    <div class="hint">多 GPU 时指定使用哪块（通常为 0）</div>
+  </div>
+
+  <div class="actions">
+    <button class="btn-primary" id="btn-start" onclick="startApp()">开始使用</button>
+  </div>
+</div>
+
+<script>
+  async function browse(fieldId) {
+    const folder = await window.electronAPI.selectFolder();
+    if (folder) {
+      document.getElementById(fieldId).value = folder;
+    }
+  }
+
+  function validate() {
+    let valid = true;
+    const fields = [
+      ['llm_path', 'err_llm'],
+      ['guard_path', 'err_guard'],
+      ['outputs_dir', 'err_outputs'],
+    ];
+    fields.forEach(([id, errId]) => {
+      const val = document.getElementById(id).value.trim();
+      const err = document.getElementById(errId);
+      if (!val) {
+        err.style.display = 'block';
+        valid = false;
+      } else {
+        err.style.display = 'none';
+      }
+    });
+    return valid;
+  }
+
+  async function startApp() {
+    if (!validate()) return;
+
+    const btn = document.getElementById('btn-start');
+    btn.disabled = true;
+    btn.textContent = '正在启动...';
+
+    const cfg = {
+      llm_path: document.getElementById('llm_path').value.trim(),
+      guard_path: document.getElementById('guard_path').value.trim(),
+      outputs_dir: document.getElementById('outputs_dir').value.trim(),
+      cuda_device: document.getElementById('cuda_device').value.trim() || '0',
+      setup_completed: true,
+    };
+
+    await window.electronAPI.setupComplete(cfg);
+  }
+
+  // Pre-fill if config already exists
+  window.electronAPI.getConfig().then(cfg => {
+    if (cfg) {
+      if (cfg.llm_path) document.getElementById('llm_path').value = cfg.llm_path;
+      if (cfg.guard_path) document.getElementById('guard_path').value = cfg.guard_path;
+      if (cfg.outputs_dir) document.getElementById('outputs_dir').value = cfg.outputs_dir;
+      if (cfg.cuda_device) document.getElementById('cuda_device').value = cfg.cuda_device;
+    }
+  });
+</script>
+</body>
+</html>

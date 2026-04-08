@@ -20,7 +20,6 @@ import {
 } from '@mui/material';
 import { useStore } from '../store';
 import { layerApi } from '../services/api';
-import { LayerEvolutionData } from '../types';
 
 interface LayerData {
   layer: number;
@@ -258,6 +257,7 @@ export const LayerView: React.FC = () => {
       )}
 
       {!isLoading && layerData.length > 0 && (
+      <>
       <Grid container spacing={2} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={4}>
           <Card sx={{ bgcolor: '#e3f2fd' }}>
@@ -347,6 +347,7 @@ export const LayerView: React.FC = () => {
           </TableBody>
         </Table>
       </TableContainer>
+      </>
       )}
     </Box>
   );

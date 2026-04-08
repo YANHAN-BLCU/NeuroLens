@@ -28,9 +28,21 @@ if torch.cuda.is_available():
 LLM_ID = "LLM-Research/Meta-Llama-3-8B-Instruct"
 GUARD_ID = "LLM-Research/Llama-Guard-3-8B"
 
-# 模型路径配置：优先使用本地路径（/cache/），如果不存在则使用 ModelScope ID
-LLM_LOCAL_PATH = os.getenv("LLM_LOCAL_PATH", "F:/models/Meta-Llama-3-8B-Instruct")
-GUARD_LOCAL_PATH = os.getenv("GUARD_LOCAL_PATH", "F:/models/Llama-Guard-3-8B")
+# 从 app_config.json 读取用户配置的模型路径（Electron 应用写入）
+def _read_app_config() -> dict:
+    config_path = Path(__file__).parent.parent / "configs" / "runtime" / "app_config.json"
+    try:
+        if config_path.exists():
+            return json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+_app_cfg = _read_app_config()
+
+# 模型路径优先级：环境变量 > app_config.json > 默认路径
+LLM_LOCAL_PATH = os.getenv("LLM_LOCAL_PATH") or _app_cfg.get("llm_path", "F:/models/Meta-Llama-3-8B-Instruct")
+GUARD_LOCAL_PATH = os.getenv("GUARD_LOCAL_PATH") or _app_cfg.get("guard_path", "F:/models/Llama-Guard-3-8B")
 # Docker容器内路径（优先检查 /cache，这是当前容器的挂载点）
 LLM_CONTAINER_PATH = os.getenv("LLM_CONTAINER_PATH", "/cache/Meta-Llama-3-8B-Instruct")
 GUARD_CONTAINER_PATH = os.getenv("GUARD_CONTAINER_PATH", "/cache/Llama-Guard-3-8B")

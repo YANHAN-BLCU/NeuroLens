@@ -1,0 +1,74 @@
+{
+  "name": "neurolens",
+  "version": "1.0.0",
+  "description": "NeuroLens - LLM Safety Neuron Analysis Platform",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:frontend": "cd visualization/frontend && npm run build",
+    "dist": "npm run build:frontend && electron-builder --linux",
+    "dist:dir": "npm run build:frontend && electron-builder --linux --dir",
+    "dist:win": "npm run build:frontend && electron-builder --win",
+    "dist:win:dir": "npm run build:frontend && electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.neurolens.app",
+    "productName": "NeuroLens",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Science"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "dist-electron/__appImage-x64/usr/share/icons/hicolor/256x256/apps/neurolens.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["zh_CN", "en_US"],
+      "language": "2052",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NeuroLens"
+    },
+    "files": [
+      "electron/**/*",
+      "engine/**/*",
+      "visualization/backend/**/*",
+      "visualization/frontend/dist/**/*",
+      "configs/**/*",
+      "requirements.txt",
+      "!**/__pycache__/**",
+      "!**/*.pyc",
+      "!**/node_modules/**",
+      "!visualization/frontend/src/**",
+      "!visualization/frontend/node_modules/**",
+      "!scripts/**",
+      "!docs/**",
+      "!data/**",
+      "!outputs/**",
+      "!ms_models/**",
+      "!logs/**",
+      "!dist-electron/**",
+      "!.git/**"
+    ],
+    "extraResources": []
+  }
+}

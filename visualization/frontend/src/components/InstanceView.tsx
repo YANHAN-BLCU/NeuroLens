@@ -1,6 +1,6 @@
 // Instance View Component - Display Jailbreak Instances
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Typography,
@@ -99,7 +99,7 @@ const MOCK_INSTANCES: JailbreakInstance[] = [
 ];
 
 export const InstanceView: React.FC = () => {
-  const [instances, setInstances] = useState<JailbreakInstance[]>(MOCK_INSTANCES);
+  const instances = MOCK_INSTANCES;
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [attackFilter, setAttackFilter] = useState<string>('');

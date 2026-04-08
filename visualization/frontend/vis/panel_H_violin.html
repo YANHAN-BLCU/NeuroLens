@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小提琴图 - 神经元激活差异</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 100vh;
+            overflow: auto;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        button {
+            padding: 6px 12px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button.secondary {
+            background: #64748b;
+        }
+
+        button.secondary:hover {
+            background: #475569;
+        }
+
+        #violin-chart {
+            width: 100%;
+            height: calc(100vh - 120px);
+            min-height: 300px;
+        }
+    </style>
+</head>
+<body>
+    <div class="panel-header">
+        <div class="panel-title" data-i18n="violin_title">激活差异视图 H</div>
+    </div>
+    
+    <div id="violin-chart"></div>
+
+    <script>
+        // Translations
+        const translations = {
+            en: {
+                violin_title: "Activation Difference View H",
+                loading: "Loading data...",
+                reload: "Reload",
+                ok_data_loaded: "Data loaded! Successful:",
+                failed_samples: ", Failed:",
+                error_load_failed: "Load failed:",
+                title_real: "Neuron Activation Distribution",
+                neuron_type: "Neuron Type",
+                activation_value: "Activation Value",
+                mean: "Mean",
+                median: "Median",
+                kde: "KDE",
+                min: "Min",
+                success: "Success",
+                failed: "Failed"
+            },
+            zh: {
+                violin_title: "激活差异视图 H",
+                loading: "正在加载数据...",
+                reload: "重新加载",
+                ok_data_loaded: "数据加载成功！成功样本:",
+                failed_samples: ", 失败样本:",
+                error_load_failed: "加载失败:",
+                title_real: "神经元激活值分布",
+                neuron_type: "神经元类型",
+                activation_value: "激活值",
+                mean: "平均值",
+                median: "中位数",
+                kde: "核密度估计",
+                min: "最小值",
+                success: "成功",
+                failed: "失败"
+            }
+        };
+
+        // Get saved language
+        let currentLang = localStorage.getItem('language') || 'zh';
+
+        // Plotly config (toolbar locale etc.)
+        function getPlotlyConfig() {
+            return {
+                responsive: true,
+                locale: currentLang === 'zh' ? 'zh-CN' : 'en-US',
+                displaylogo: false
+            };
+        }
+
+        // Update language
+        function updateLanguage(lang) {
+            currentLang = lang;
+            const dict = translations[lang] || translations.zh;
+            
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (dict[key]) {
+                    el.textContent = dict[key];
+                }
+            });
+            
+            // Reload chart with new language
+            if (window.chartData) {
+                const traces = convertToPlotlyFormat(window.chartData);
+                Plotly.newPlot('violin-chart', traces, {
+                    title: t('title_real'),
+                    xaxis: { title: t('neuron_type'), showgrid: true, tickfont: { size: 10 }, titlefont: { size: 11 } },
+                    yaxis: { title: t('activation_value'), showgrid: true, tickfont: { size: 10 }, titlefont: { size: 11 } },
+                    violinmode: 'group',
+                    violingap: 0.1,
+                    violingroupgap: 0.3,
+                    paper_bgcolor: 'white',
+                    plot_bgcolor: 'white',
+                    font: { size: 11 },
+                    // 图例进一步下移，并加大底部留白，避免英文长标签与 x 轴标题重叠
+                    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.45, yanchor: 'top' },
+                    margin: { l: 50, r: 20, t: 40, b: 90 }
+                }, getPlotlyConfig());
+            }
+        }
+
+        // Listen for language changes from parent
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'languageChange') {
+                updateLanguage(event.data.lang);
+            }
+        });
+
+        const API_BASE_URL = 'http://localhost:5000';
+        
+        function t(key) {
+            return translations[currentLang][key] || translations.zh[key] || key;
+        }
+        
+        // Load real data from API
+        async function loadData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/neuron_activations?successful=true&failed=true`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Store data for language switching
+                window.chartData = data;
+                
+                const traces = convertToPlotlyFormat(data);
+                
+                Plotly.newPlot('violin-chart', traces, {
+                    title: t('title_real'),
+                    xaxis: { title: t('neuron_type'), showgrid: true, tickfont: { size: 10 }, titlefont: { size: 11 } },
+                    yaxis: { title: t('activation_value'), showgrid: true, tickfont: { size: 10 }, titlefont: { size: 11 } },
+                    violinmode: 'group',
+                    violingap: 0.1,
+                    violingroupgap: 0.3,
+                    paper_bgcolor: 'white',
+                    plot_bgcolor: 'white',
+                    font: { size: 11 },
+                    // 图例进一步下移，并加大底部留白，避免英文长标签与 x 轴标题重叠
+                    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.45, yanchor: 'top' },
+                    margin: { l: 50, r: 20, t: 40, b: 90 }
+                }, getPlotlyConfig());
+                
+            } catch (error) {
+                console.error('Load failed:', error);
+                const defaultData = {};
+                const types = [['S+A+', 0.6, 0.2, 0, -0.3, 0.15, 1], ['S-A-', -0.4, 0.2, 2, 0.2, 0.15, 0.5], ['S+A-', 0.3, 0.25, 1, -0.1, 0.2, 2], ['S-A+', -0.2, 0.3, 0.3, 0.1, 0.25, 1.5]];
+                types.forEach(([type, sb, sa, sp, fb, fa, fp]) => {
+                    defaultData[type] = {
+                        successful: Array.from({length:40}, (_,i) => Math.round((sb + sa*Math.sin(i*0.7+sp))*1000)/1000),
+                        failed: Array.from({length:40}, (_,i) => Math.round((fb + fa*Math.sin(i*0.7+fp))*1000)/1000)
+                    };
+                });
+                window.chartData = defaultData;
+                const traces = convertToPlotlyFormat(defaultData);
+                Plotly.newPlot('violin-chart', traces, {
+                    title: t('title_real'),
+                    xaxis: { title: t('neuron_type'), showgrid: true, tickfont: { size: 10 }, titlefont: { size: 11 } },
+                    yaxis: { title: t('activation_value'), showgrid: true, tickfont: { size: 10 }, titlefont: { size: 11 } },
+                    violinmode: 'group',
+                    violingap: 0.1,
+                    violingroupgap: 0.3,
+                    paper_bgcolor: 'white',
+                    plot_bgcolor: 'white',
+                    font: { size: 11 },
+                    // 图例进一步下移，并加大底部留白，避免英文长标签与 x 轴标题重叠
+                    legend: { orientation: 'h', x: 0.5, xanchor: 'center', y: -0.45, yanchor: 'top' },
+                    margin: { l: 50, r: 20, t: 40, b: 90 }
+                }, getPlotlyConfig());
+            }
+        }
+
+        // Helper to compute statistics for hover
+        function computeStats(arr) {
+            if (!arr || arr.length === 0) {
+                return null;
+            }
+            const n = arr.length;
+            const sorted = [...arr].sort((a, b) => a - b);
+            const sum = arr.reduce((acc, v) => acc + v, 0);
+            const mean = sum / n;
+            const mid = Math.floor(n / 2);
+            const median = n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+            const min = sorted[0];
+            return { mean, median, min };
+        }
+
+        // Convert to Plotly violin plot format
+        function convertToPlotlyFormat(data) {
+            const traces = [];
+            const neuronTypes = ['S+A+', 'S-A-', 'S+A-', 'S-A+'];
+            const colors = {
+                successful: 'rgba(157, 208, 199, 0.7)',
+                failed: 'rgba(217, 189, 216, 0.7)'
+            };
+            
+            const successLabel = t('success');
+            const failedLabel = t('failed');
+            
+            neuronTypes.forEach((type, index) => {
+                const quadrantData = data[type] || { successful: [], failed: [] };
+                const successful = quadrantData.successful || [];
+                const failed = quadrantData.failed || [];
+                
+                if (successful.length > 0) {
+                    const stats = computeStats(successful);
+                    traces.push({
+                        type: 'violin',
+                        x: Array(successful.length).fill(`${type}\n(${successLabel})`),
+                        y: successful,
+                        name: `${type} - ${successLabel}`,
+                        box: { visible: true },
+                        meanline: { visible: true },
+                        fillcolor: colors.successful,
+                        line: { color: '#74B69F' },
+                        side: 'negative',
+                        width: 0.5,
+                        customdata: stats ? successful.map(() => [stats.mean, stats.median, stats.min]) : undefined,
+                        hovertemplate: `${t('neuron_type')}: ${type}<br>` +
+                                       `${t('activation_value')}: %{y}<br>` +
+                                       `${t('mean')}: %{customdata[0]:.3f}<br>` +
+                                       `${t('median')}: %{customdata[1]:.3f}<br>` +
+                                       `${t('min')}: %{customdata[2]:.3f}<br>` +
+                                       `${t('success')}` +
+                                       '<extra></extra>'
+                    });
+                }
+                
+                if (failed.length > 0) {
+                    const stats = computeStats(failed);
+                    traces.push({
+                        type: 'violin',
+                        x: Array(failed.length).fill(`${type}\n(${failedLabel})`),
+                        y: failed,
+                        name: `${type} - ${failedLabel}`,
+                        box: { visible: true },
+                        meanline: { visible: true },
+                        fillcolor: colors.failed,
+                        line: { color: '#9180AC' },
+                        side: 'positive',
+                        width: 0.5,
+                        customdata: stats ? failed.map(() => [stats.mean, stats.median, stats.min]) : undefined,
+                        hovertemplate: `${t('neuron_type')}: ${type}<br>` +
+                                       `${t('activation_value')}: %{y}<br>` +
+                                       `${t('mean')}: %{customdata[0]:.3f}<br>` +
+                                       `${t('median')}: %{customdata[1]:.3f}<br>` +
+                                       `${t('min')}: %{customdata[2]:.3f}<br>` +
+                                       `${t('failed')}` +
+                                       '<extra></extra>'
+                    });
+                }
+            });
+            
+            return traces;
+        }
+
+        // Page load - auto load data
+        window.onload = function() {
+            updateLanguage(currentLang);
+            loadData();
+        };
+    </script>
+</body>
+</html>

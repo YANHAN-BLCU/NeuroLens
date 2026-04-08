@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>桑基图 - 越狱样本溯源路径</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 100vh;
+            overflow: auto;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        button {
+            padding: 6px 12px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button.secondary {
+            background: #64748b;
+        }
+
+        button.secondary:hover {
+            background: #475569;
+        }
+
+        #sankey-chart {
+            width: 100%;
+            /* 稍微减小可视高度，让图和图例整体更靠下且不顶满屏幕 */
+            height: calc(100vh - 150px);
+            min-height: 320px;
+        }
+    </style>
+</head>
+<body>
+    <div class="panel-header">
+        <div class="panel-title" data-i18n="sankey_title">样本溯源视图 G</div>
+    </div>
+    
+    <div id="sankey-chart"></div>
+
+    <script>
+        // Translations
+        const translations = {
+            en: {
+                sankey_title: "Sample Origin View G",
+                loading: "Loading data...",
+                reload: "Reload",
+                ok_data_loaded: "Data loaded! Nodes:",
+                connections: "connections",
+                error_load_failed: "Load failed:",
+                title_real: "Jailbreak Sample Tracing Path"
+            },
+            zh: {
+                sankey_title: "样本溯源视图 G",
+                loading: "正在加载数据...",
+                reload: "重新加载",
+                ok_data_loaded: "数据加载成功！节点:",
+                connections: "连接",
+                error_load_failed: "加载失败:",
+                title_real: "越狱样本溯源路径"
+            }
+        };
+
+        // Get saved language
+        let currentLang = localStorage.getItem('language') || 'zh';
+
+        // Plotly config (toolbar locale etc.)
+        function getPlotlyConfig() {
+            return {
+                responsive: true,
+                locale: currentLang === 'zh' ? 'zh-CN' : 'en-US',
+                displaylogo: false
+            };
+        }
+
+        // Update language
+        function updateLanguage(lang) {
+            currentLang = lang;
+            const dict = translations[lang] || translations.zh;
+            
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (dict[key]) {
+                    el.textContent = dict[key];
+                }
+            });
+            
+            // Reload chart with new language
+            if (window.chartData) {
+                const plotlyData = convertToPlotlyFormat(window.chartData);
+                Plotly.newPlot('sankey-chart', [plotlyData], {
+                    title: t('title_real'),
+                    font: { size: 12 },
+                    paper_bgcolor: "white",
+                    plot_bgcolor: "white",
+                    margin: { l: 10, r: 10, t: 40, b: 40 },
+                    // 图例靠底部、水平排布
+                    showlegend: true,
+                    legend: {
+                        orientation: "h",
+                        x: 0.5,
+                        xanchor: "center",
+                        /* 再往下移动图例背景矩形，避免和上方神经元类型文字重叠 */
+                        y: -1.0,
+                        yanchor: "top"
+                    }
+                }, getPlotlyConfig());
+            }
+        }
+
+        // Listen for language changes from parent
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'languageChange') {
+                updateLanguage(event.data.lang);
+            }
+        });
+
+        const API_BASE_URL = 'http://localhost:5000';
+        
+        function t(key) {
+            return translations[currentLang][key] || translations.zh[key] || key;
+        }
+        
+        // Load real data from API
+        async function loadData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/attack_paths`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Store data for language switching
+                window.chartData = data;
+                
+                const plotlyData = convertToPlotlyFormat(data);
+                
+                Plotly.newPlot('sankey-chart', [plotlyData], {
+                    title: t('title_real'),
+                    font: { size: 12 },
+                    paper_bgcolor: "white",
+                    plot_bgcolor: "white",
+                    margin: { l: 10, r: 10, t: 40, b: 40 },
+                    showlegend: true,
+                    legend: {
+                        orientation: "h",
+                        x: 0.5,
+                        xanchor: "center",
+                        /* 再往下移动图例背景矩形，避免和上方神经元类型文字重叠 */
+                        y: -1.0,
+                        yanchor: "top"
+                    }
+                }, getPlotlyConfig());
+                
+            } catch (error) {
+                console.error('Load failed:', error);
+                const defaultData = {
+                    nodes: [
+                        {id: 'GCG',       label: 'GCG',       type: 'attack'},
+                        {id: 'AutoDAN',   label: 'AutoDAN',   type: 'attack'},
+                        {id: 'PAIR',      label: 'PAIR',      type: 'attack'},
+                        {id: 'GPTFuzz',   label: 'GPTFuzz',   type: 'attack'},
+                        {id: 'Q1',        label: 'Q1 (S+A+)', type: 'quadrant'},
+                        {id: 'Q2',        label: 'Q2 (S-A-)', type: 'quadrant'},
+                        {id: 'Q3',        label: 'Q3 (S+A-)', type: 'quadrant'},
+                        {id: 'Q4',        label: 'Q4 (S-A+)', type: 'quadrant'},
+                        {id: 'Jailbroken',label: 'Jailbroken',type: 'output'},
+                        {id: 'Refused',   label: 'Refused',   type: 'output'}
+                    ],
+                    links: [
+                        {source: 'GCG',     target: 'Q1',        value: 25},
+                        {source: 'GCG',     target: 'Q2',        value: 10},
+                        {source: 'GCG',     target: 'Q3',        value: 15},
+                        {source: 'GCG',     target: 'Q4',        value:  8},
+                        {source: 'AutoDAN', target: 'Q1',        value: 30},
+                        {source: 'AutoDAN', target: 'Q2',        value:  8},
+                        {source: 'AutoDAN', target: 'Q3',        value: 12},
+                        {source: 'AutoDAN', target: 'Q4',        value:  5},
+                        {source: 'PAIR',    target: 'Q1',        value: 18},
+                        {source: 'PAIR',    target: 'Q2',        value: 12},
+                        {source: 'PAIR',    target: 'Q3',        value: 20},
+                        {source: 'PAIR',    target: 'Q4',        value: 10},
+                        {source: 'GPTFuzz', target: 'Q1',        value: 22},
+                        {source: 'GPTFuzz', target: 'Q2',        value: 15},
+                        {source: 'GPTFuzz', target: 'Q3',        value: 18},
+                        {source: 'GPTFuzz', target: 'Q4',        value:  7},
+                        {source: 'Q1',      target: 'Jailbroken',value: 70},
+                        {source: 'Q1',      target: 'Refused',   value: 25},
+                        {source: 'Q2',      target: 'Jailbroken',value: 20},
+                        {source: 'Q2',      target: 'Refused',   value: 25},
+                        {source: 'Q3',      target: 'Jailbroken',value: 45},
+                        {source: 'Q3',      target: 'Refused',   value: 20},
+                        {source: 'Q4',      target: 'Jailbroken',value: 15},
+                        {source: 'Q4',      target: 'Refused',   value: 15}
+                    ]
+                };
+                window.chartData = defaultData;
+                const plotlyData = convertToPlotlyFormat(defaultData);
+                Plotly.newPlot('sankey-chart', [plotlyData], {
+                    title: t('title_real'),
+                    font: { size: 12 },
+                    paper_bgcolor: "white",
+                    plot_bgcolor: "white",
+                    margin: { l: 10, r: 10, t: 40, b: 40 },
+                    showlegend: true,
+                    legend: {
+                        orientation: "h",
+                        x: 0.5,
+                        xanchor: "center",
+                        /* 再往下移动图例背景矩形，避免和上方神经元类型文字重叠 */
+                        y: -1.0,
+                        yanchor: "top"
+                    }
+                }, getPlotlyConfig());
+            }
+        }
+
+        // Convert to Plotly Sankey format
+        function convertToPlotlyFormat(data) {
+            const nodes = data.nodes || [];
+            const links = data.links || [];
+            
+            const labels = nodes.map(n => n.label);
+            const colors = nodes.map(n => {
+                const type = n.type || 'other';
+                const colorMap = {
+                    'attack': '#EEC79F',
+                    'quadrant': '#74B69F',
+                    'output': n.label === 'Jailbroken' ? '#A6CDE4' : '#E2C8D8'
+                };
+                return colorMap[type] || '#F1DFA4';
+            });
+            
+            const sources = links.map(l => {
+                const sourceNode = nodes.find(n => n.id === l.source);
+                return nodes.indexOf(sourceNode);
+            });
+            
+            const targets = links.map(l => {
+                const targetNode = nodes.find(n => n.id === l.target);
+                return nodes.indexOf(targetNode);
+            });
+            
+            const values = links.map(l => l.value || 1);
+
+            // 计算每个节点的流入量和流出量，用于自定义 hover 文案
+            const incomingCounts = new Array(nodes.length).fill(0);
+            const outgoingCounts = new Array(nodes.length).fill(0);
+
+            links.forEach((l) => {
+                const value = l.value || 1;
+                const sourceNode = nodes.find(n => n.id === l.source);
+                const targetNode = nodes.find(n => n.id === l.target);
+                const sIdx = nodes.indexOf(sourceNode);
+                const tIdx = nodes.indexOf(targetNode);
+                if (sIdx >= 0) {
+                    outgoingCounts[sIdx] += value;
+                }
+                if (tIdx >= 0) {
+                    incomingCounts[tIdx] += value;
+                }
+            });
+
+            const nodeCustomData = nodes.map((_, idx) => [incomingCounts[idx], outgoingCounts[idx]]);
+            const linkColors = links.map(l => l.color || 'rgba(168, 168, 168, 0.3)');
+
+            const isZh = currentLang === 'zh';
+            const sourceLabel = isZh ? '来源' : 'Source';
+            const targetLabel = isZh ? '去向' : 'Target';
+            const valueLabel = isZh ? '数量' : 'Count';
+            const nodeLabelPrefix = isZh ? '节点: ' : 'Node: ';
+            const nodeIncomingLabel = isZh ? '流入量计数' : 'Incoming flow count';
+            const nodeOutgoingLabel = isZh ? '流出量计数' : 'Outgoing flow count';
+            
+            return {
+                type: "sankey",
+                // 调整桑基图在画布中的垂直位置和占比（稍微往下、留出顶部和底部空间）
+                domain: {
+                    x: [0.03, 0.97],
+                    y: [0.08, 0.9]
+                },
+                node: {
+                    pad: 12,
+                    thickness: 18,
+                    line: {
+                        color: "black",
+                        width: 0.5
+                    },
+                    label: labels,
+                    color: colors,
+                    customdata: nodeCustomData,
+                    // 自定义中英文的 "incoming/outgoing flow count" 文案
+                    hovertemplate:
+                        `${nodeLabelPrefix}%{label}<br>` +
+                        `${nodeIncomingLabel}: %{customdata[0]}<br>` +
+                        `${nodeOutgoingLabel}: %{customdata[1]}<extra></extra>`
+                },
+                link: {
+                    source: sources,
+                    target: targets,
+                    value: values,
+                    color: linkColors,
+                    hovertemplate: `${sourceLabel}: %{source.label}<br>` +
+                                   `${targetLabel}: %{target.label}<br>` +
+                                   `${valueLabel}: %{value}` +
+                                   '<extra></extra>'
+                }
+            };
+        }
+
+        // Page load - auto load data
+        window.onload = function() {
+            updateLanguage(currentLang);
+            loadData();
+        };
+    </script>
+</body>
+</html>
