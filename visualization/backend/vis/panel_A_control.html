@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Panel A</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { padding: 16px; background: #fff; height: 100vh; overflow: auto; font-size: 13px; }
+        .panel-header { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #333; }
+        .section { margin-bottom: 18px; }
+        .section-title { font-size: 13px; font-weight: 600; color: #555; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .form-group { margin-bottom: 10px; }
+        label { display: block; font-size: 11px; color: #888; margin-bottom: 3px; }
+        select { width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; background: #fff; }
+        select:focus { border-color: #2563eb; outline: none; }
+        .row { display: flex; gap: 8px; align-items: center; }
+        .row > * { flex: 1; }
+        input[type="number"] { width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; }
+        .btn { padding: 7px 14px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500; transition: all 0.15s; }
+        .btn-primary { background: #444; color: #fff; }
+        .btn-primary:hover { background: #333; }
+        .btn-primary:disabled { background: #999; cursor: not-allowed; }
+        .btn-secondary { background: #6b7280; color: #fff; }
+        .btn-secondary:hover { background: #4b5563; }
+        .btn-danger { background: #ef4444; color: #fff; width: 100%; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-switch { background: #2563eb; color: #fff; }
+        .btn-switch:hover { background: #1d4ed8; }
+        .btn-switch:disabled { background: #93c5fd; cursor: not-allowed; }
+        .progress-container { margin-top: 12px; display: none; }
+        .progress-container.active { display: block; }
+        .progress-bar-bg { height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #2563eb, #7c3aed); border-radius: 4px; transition: width 0.3s; width: 0%; }
+        .progress-stats { margin-top: 8px; font-size: 11px; color: #666; line-height: 1.8; }
+        .progress-stats .stat-value { color: #111; font-weight: 600; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+        .status-ready { background: #d1fae5; color: #065f46; }
+        .status-running { background: #fef3c7; color: #92400e; }
+        .status-done { background: #dbeafe; color: #1e40af; }
+        .status-error { background: #fee2e2; color: #991b1b; }
+        .config-summary { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px 12px; font-size: 11px; color: #666; margin-top: 12px; }
+        .config-summary strong { color: #111; }
+        .log-container { margin-top: 10px; background: #1e1e1e; border-radius: 6px; padding: 8px; display: none; max-height: 150px; overflow-y: auto; }
+        .log-container.active { display: block; }
+        .log-container pre { color: #d4d4d4; font-size: 10px; font-family: 'Cascadia Code', 'Fira Code', monospace; white-space: pre-wrap; word-break: break-all; margin: 0; }
+        .divider { height: 1px; background: #e5e7eb; margin: 14px 0; }
+    </style>
+</head>
+<body>
+    <div class="panel-header">Control Panel A</div>
+
+    <!-- Model Selection -->
+    <div class="section">
+        <div class="section-title">Model</div>
+        <div class="form-group">
+            <select id="modelSelect"><option value="">Loading...</option></select>
+        </div>
+        <div class="form-group">
+            <div class="row">
+                <select id="versionSelect"><option value="baseline">baseline</option></select>
+                <button class="btn btn-switch" id="switchBtn" disabled>Switch</button>
+            </div>
+        </div>
+        <div id="modelInfo" style="font-size:11px;color:#888;margin-top:4px;"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Test Level -->
+    <div class="section">
+        <div class="section-title">Test Level</div>
+        <div class="form-group">
+            <select id="levelSelect">
+                <option value="quick">Quick (200 ~3min)</option>
+                <option value="standard">Standard (500 ~8min)</option>
+                <option value="full">Full (5000 ~80min)</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Inference Parameters -->
+    <div class="section">
+        <div class="section-title">Inference</div>
+        <div class="form-group">
+            <div class="row">
+                <div><label>Batch Size</label><input type="number" id="batchSizeInput" value="4" min="1" max="64"></div>
+                <div><label>Max Tokens</label><input type="number" id="maxTokensInput" value="64" min="16" max="1024" step="16"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attack Types -->
+    <div class="section">
+        <div class="section-title">Attack Types</div>
+        <div class="form-group">
+            <select id="attackSelect" multiple size="4">
+                <option value="all" selected>All Attack Types</option>
+            </select>
+        </div>
+        <div style="font-size:10px;color:#aaa;margin-top:2px;">Hold Ctrl to multi-select</div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Action Buttons -->
+    <div class="section">
+        <div class="row">
+            <button class="btn btn-primary" id="runBtn" style="flex:2;">Run Pipeline</button>
+            <button class="btn btn-secondary" id="refreshBtn">Refresh</button>
+        </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-container" id="progressContainer">
+        <div class="progress-bar-bg">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-stats" id="progressStats"></div>
+    </div>
+
+    <!-- Status -->
+    <div style="margin-top:8px;">
+        <span class="status-badge status-ready" id="statusBadge">Ready</span>
+    </div>
+
+    <!-- Log -->
+    <div class="log-container" id="logContainer"><pre id="logContent"></pre></div>
+
+    <!-- Config Summary -->
+    <div class="config-summary" id="configSummary"><strong>No model selected</strong></div>
+
+    <!-- Stop -->
+    <div style="margin-top:12px;">
+        <button class="btn btn-danger" id="breakBtn">Stop</button>
+    </div>
+
+    <script>
+        // State
+        let models = [];
+        let activeModel = '';
+        let activeVersion = 'baseline';
+        let isRunning = false;
+        let currentTaskId = null;
+        let pollTimer = null;
+
+        const API = '';
+
+        // DOM
+        const $modelSelect = document.getElementById('modelSelect');
+        const $versionSelect = document.getElementById('versionSelect');
+        const $switchBtn = document.getElementById('switchBtn');
+        const $modelInfo = document.getElementById('modelInfo');
+        const $levelSelect = document.getElementById('levelSelect');
+        const $attackSelect = document.getElementById('attackSelect');
+        const $runBtn = document.getElementById('runBtn');
+        const $refreshBtn = document.getElementById('refreshBtn');
+        const $progressContainer = document.getElementById('progressContainer');
+        const $progressBar = document.getElementById('progressBar');
+        const $progressStats = document.getElementById('progressStats');
+        const $statusBadge = document.getElementById('statusBadge');
+        const $logContainer = document.getElementById('logContainer');
+        const $logContent = document.getElementById('logContent');
+        const $configSummary = document.getElementById('configSummary');
+        const $breakBtn = document.getElementById('breakBtn');
+
+        const TEST_LEVELS = {
+            quick: { label: 'Quick', samples: 200 },
+            standard: { label: 'Standard', samples: 500 },
+            full: { label: 'Full', samples: 5000 },
+        };
+
+        // API Helper
+        async function api(path, method = 'GET', body = null) {
+            const opts = { method, headers: { 'Content-Type': 'application/json' } };
+            if (body) opts.body = JSON.stringify(body);
+            const res = await fetch(API + path, opts);
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        }
+
+        // Load Models
+        async function loadModels() {
+            try {
+                const data = await api('/api/models');
+                models = data.models || [];
+                activeModel = data.active?.model || '';
+                activeVersion = data.active?.version || 'baseline';
+                $modelSelect.innerHTML = models.length
+                    ? models.map(m => `<option value="${m.name}" ${m.name === activeModel ? 'selected' : ''}>${m.name}</option>`).join('')
+                    : '<option value="">No models found</option>';
+                if (activeModel) {
+                    await loadVersions(activeModel);
+                    updateModelInfo();
+                }
+            } catch (e) {
+                $modelSelect.innerHTML = '<option value="">Load failed</option>';
+            }
+        }
+
+        async function loadVersions(modelName) {
+            try {
+                const data = await api(`/api/models/${modelName}/versions`);
+                const versions = data.versions || [];
+                if (versions.length === 0) {
+                    // baseline 条目本身没有子版本，隐藏版本选择器
+                    $versionSelect.innerHTML = '<option value="">—</option>';
+                    $versionSelect.disabled = true;
+                } else {
+                    $versionSelect.innerHTML = versions.map(v =>
+                        `<option value="${v.name}" ${v.name === activeVersion ? 'selected' : ''}>${v.name}</option>`
+                    ).join('');
+                    $versionSelect.disabled = false;
+                }
+                $switchBtn.disabled = false;
+            } catch {
+                $versionSelect.innerHTML = '<option value="baseline">baseline</option>';
+                $versionSelect.disabled = false;
+                $switchBtn.disabled = false;
+            }
+        }
+
+        function updateModelInfo() {
+            const m = models.find(m => m.name === activeModel);
+            if (m) {
+                $modelInfo.textContent = `${m.num_layers || '?'} layers | hidden=${m.hidden_size || '?'} | vocab=${m.vocab_size || '?'}`;
+            }
+            updateConfigSummary();
+        }
+
+        function updateConfigSummary() {
+            const level = TEST_LEVELS[$levelSelect.value];
+            const bs = document.getElementById('batchSizeInput').value || 8;
+            const mt = document.getElementById('maxTokensInput').value || 128;
+            $configSummary.innerHTML = `<strong>${activeModel || 'None'}</strong> | ${activeVersion}<br>Level: ${level.label} (${level.samples}) | batch: ${bs} | max_tokens: ${mt}`;
+        }
+
+        function getSelectedAttacks() {
+            const opts = Array.from($attackSelect.selectedOptions);
+            if (opts.some(o => o.value === 'all')) return ['all'];
+            return opts.map(o => o.value);
+        }
+
+        // Load Attack Types
+        async function loadAttackTypes() {
+            try {
+                const data = await api('/api/data/attacks');
+                const attacks = data.attacks || [];
+                $attackSelect.innerHTML = '<option value="all" selected>All Attack Types</option>';
+                attacks.forEach(a => { $attackSelect.innerHTML += `<option value="${a}">${a}</option>`; });
+            } catch {
+                $attackSelect.innerHTML = '<option value="all" selected>All Attack Types</option>';
+            }
+        }
+
+        // Model change
+        $modelSelect.addEventListener('change', async () => {
+            const name = $modelSelect.value;
+            if (name) { activeModel = name; await loadVersions(name); updateModelInfo(); }
+        });
+
+        // Switch
+        $switchBtn.addEventListener('click', async () => {
+            const model = $modelSelect.value;
+            const version = $versionSelect.disabled ? '' : $versionSelect.value;
+            if (!model) return;
+            $switchBtn.disabled = true;
+            $switchBtn.textContent = 'Switching...';
+            try {
+                await api('/api/models/switch', 'POST', { model, version });
+                activeModel = model;
+                activeVersion = version;
+                updateConfigSummary();
+                broadcast({ type: 'modelSwitched', model, version });
+            } catch (e) {
+                setStatus('error', 'Switch failed: ' + e.message);
+            } finally {
+                $switchBtn.disabled = false;
+                $switchBtn.textContent = 'Switch';
+            }
+        });
+
+        $levelSelect.addEventListener('change', updateConfigSummary);
+
+        // Run Pipeline
+        $runBtn.addEventListener('click', async () => {
+            const model = $modelSelect.value;
+            if (!model) { setStatus('error', 'Select a model first'); return; }
+            if (isRunning) return;
+
+            isRunning = true;
+            $runBtn.disabled = true;
+            $runBtn.textContent = 'Running...';
+            $progressContainer.classList.add('active');
+            $logContainer.classList.add('active');
+            $logContent.textContent = '';
+            setStatus('running', 'Running...');
+
+            try {
+                const data = await api('/api/pipeline/run', 'POST', {
+                    model: model,
+                    level: $levelSelect.value,
+                    attack_types: getSelectedAttacks(),
+                    finetune_method: 'none',
+                    threshold: 0.5,
+                    batch_size: parseInt(document.getElementById('batchSizeInput').value) || 8,
+                    max_tokens: parseInt(document.getElementById('maxTokensInput').value) || 128,
+                });
+                currentTaskId = data.task_id;
+                pollStatus(data.task_id);
+            } catch (e) {
+                setStatus('error', 'Start failed: ' + e.message);
+                isRunning = false;
+                $runBtn.disabled = false;
+                $runBtn.textContent = 'Run Pipeline';
+            }
+        });
+
+        // Poll Status
+        function pollStatus(taskId) {
+            pollTimer = setInterval(async () => {
+                try {
+                    const data = await api(`/api/pipeline/status/${taskId}`);
+                    if (data.progress !== undefined) {
+                        $progressBar.style.width = data.progress + '%';
+                    }
+                    if (data.last_output) {
+                        try {
+                            const info = typeof data.last_output === 'string' ? JSON.parse(data.last_output) : data.last_output;
+                            updateProgressStats(info);
+                        } catch {}
+                    }
+                    if (data.log_lines) {
+                        $logContent.textContent += data.log_lines.join('\n') + '\n';
+                        $logContent.scrollTop = 99999;
+                    }
+                    if (data.status === 'completed') {
+                        clearInterval(pollTimer);
+                        isRunning = false;
+                        $runBtn.disabled = false;
+                        $runBtn.textContent = 'Run Pipeline';
+                        setStatus('done', 'Done!');
+                        const newVersion = data.version || activeVersion;
+                        activeVersion = newVersion;
+                        $versionSelect.value = newVersion;
+                        try { await api('/api/models/switch', 'POST', { model: activeModel, version: newVersion }); } catch {}
+                        await loadVersions(activeModel);
+                        $versionSelect.value = newVersion;
+                        broadcast({ type: 'pipelineDone', model: activeModel, version: newVersion });
+                    }
+                    if (data.status === 'failed') {
+                        clearInterval(pollTimer);
+                        isRunning = false;
+                        $runBtn.disabled = false;
+                        $runBtn.textContent = 'Run Pipeline';
+                        setStatus('error', 'Failed: ' + (data.error || 'unknown'));
+                    }
+                } catch {}
+            }, 1500);
+        }
+
+        function updateProgressStats(info) {
+            const parts = [];
+            if (info.current && info.total) parts.push(`<span class="stat-value">${info.current}/${info.total}</span>`);
+            if (info.asr !== undefined) parts.push(`ASR: <span class="stat-value">${(info.asr * 100).toFixed(1)}%</span>`);
+            if (info.speed) parts.push(`<span class="stat-value">${info.speed}/s</span>`);
+            if (info.eta) parts.push(`ETA: <span class="stat-value">${Math.round(info.eta)}s</span>`);
+            if (info.elapsed) parts.push(`Elapsed: <span class="stat-value">${info.elapsed}s</span>`);
+            $progressStats.innerHTML = parts.join(' | ');
+        }
+
+        // Stop
+        $breakBtn.addEventListener('click', async () => {
+            if (currentTaskId) {
+                try { await api(`/api/pipeline/cancel/${currentTaskId}`, 'POST'); } catch {}
+            }
+            if (pollTimer) clearInterval(pollTimer);
+            isRunning = false;
+            $runBtn.disabled = false;
+            $runBtn.textContent = 'Run Pipeline';
+            setStatus('error', 'Stopped');
+        });
+
+        // Refresh
+        $refreshBtn.addEventListener('click', () => { broadcast({ type: 'refreshPanels' }); });
+
+        // Status
+        function setStatus(type, msg) {
+            $statusBadge.className = 'status-badge';
+            if (type === 'ready') $statusBadge.classList.add('status-ready');
+            else if (type === 'running') $statusBadge.classList.add('status-running');
+            else if (type === 'done') $statusBadge.classList.add('status-done');
+            else if (type === 'error') $statusBadge.classList.add('status-error');
+            $statusBadge.textContent = msg;
+        }
+
+        // Broadcast
+        function broadcast(data) {
+            data.source = 'panelA';
+            window.parent.postMessage(data, '*');
+        }
+
+        // Init
+        (async () => {
+            await loadModels();
+            await loadAttackTypes();
+        })();
+    </script>
+</body>
+</html>

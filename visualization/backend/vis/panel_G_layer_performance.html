@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Layer Performance G</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 90vh;
+        }
+
+        .panel-header {
+            margin-bottom: 16px;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .chart-container {
+            flex: 1;
+            min-height: 200px;
+            position: relative;
+        }
+
+        .loading {
+            color: #666;
+            font-size: 14px;
+            text-align: center;
+            padding: 20px;
+        }
+    </style>
+    <script src="/vis/echarts.min.js"></script>
+</head>
+<body>
+    <div class="panel-header">
+        <div class="panel-title">Layer Performance G</div>
+    </div>
+
+    <div class="chart-container" id="metricChart">
+        <div class="loading">Loading layer metrics...</div>
+    </div>
+
+    <script>
+        const chartDom = document.getElementById('metricChart');
+        const myChart = echarts.init(chartDom);
+
+        // 加载各层的 probe metrics 数据
+        async function loadMetricsData() {
+            const layers = [];
+            
+            // 加载每一层的 metrics
+            for (let i = 0; i <= 32; i++) {
+                try {
+                    const response = await fetch(`../outputs/probes/layer_${i}/metrics.json`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        layers.push({
+                            layer: i,
+                            test_acc: (data.test_acc * 100).toFixed(1),
+                            test_safe_acc: (data.test_safe_acc * 100).toFixed(1),
+                            test_toxic_acc: (data.test_toxic_acc * 100).toFixed(1),
+                            roc_auc: (data.test_roc_auc * 100).toFixed(1)
+                        });
+                    }
+                } catch (e) {
+                    console.log(`Layer ${i} not found`);
+                }
+            }
+            
+            return layers;
+        }
+
+        // 更新图表 - 分面多图布局
+        function updateChart(layers) {
+            if (!layers || layers.length === 0) {
+                const lang = localStorage.getItem('language') || 'en';
+                const t = translationsG[lang] || translationsG.en;
+                chartDom.innerHTML = `<div class="loading">${t.noMetricsData}</div>`;
+                return;
+            }
+
+            const lang = localStorage.getItem('language') || 'en';
+            const t = translationsG[lang] || translationsG.en;
+
+            const layers_data = layers.map(l => `L${l.layer}`);
+            const test_acc = layers.map(l => l.test_acc);
+            const test_safe_acc = layers.map(l => l.test_safe_acc);
+            const test_toxic_acc = layers.map(l => l.test_toxic_acc);
+            const roc_auc = layers.map(l => l.roc_auc);
+
+            const option = {
+                tooltip: {
+                    trigger: 'axis'
+                },
+                // 4个独立的网格区域 (2x2布局)
+                grid: [
+                    { left: '8%', right: '55%', top: '10%', bottom: '55%' },
+                    { left: '55%', right: '8%', top: '10%', bottom: '55%' },
+                    { left: '8%', right: '55%', top: '55%', bottom: '10%' },
+                    { left: '55%', right: '8%', top: '55%', bottom: '10%' }
+                ],
+                xAxis: [
+                    { type: 'category', gridIndex: 0, data: layers_data, axisLabel: { fontSize: 8, interval: 8 } },
+                    { type: 'category', gridIndex: 1, data: layers_data, axisLabel: { fontSize: 8, interval: 8 } },
+                    { type: 'category', gridIndex: 2, data: layers_data, axisLabel: { fontSize: 8, interval: 8 } },
+                    { type: 'category', gridIndex: 3, data: layers_data, axisLabel: { fontSize: 8, interval: 8 } }
+                ],
+                yAxis: [
+                    { type: 'value', gridIndex: 0, min: 50, max: 100, name: t.testAcc, nameLocation: 'middle', nameGap: 35, axisLabel: { formatter: '{value}%', fontSize: 9 } },
+                    { type: 'value', gridIndex: 1, min: 50, max: 100, name: t.safeAcc, nameLocation: 'middle', nameGap: 35, axisLabel: { formatter: '{value}%', fontSize: 9 } },
+                    { type: 'value', gridIndex: 2, min: 50, max: 100, name: t.toxicAcc, nameLocation: 'middle', nameGap: 35, axisLabel: { formatter: '{value}%', fontSize: 9 } },
+                    { type: 'value', gridIndex: 3, min: 50, max: 100, name: t.rocAuc, nameLocation: 'middle', nameGap: 35, axisLabel: { formatter: '{value}%', fontSize: 9 } }
+                ],
+                series: [
+                    {
+                        name: t.testAcc,
+                        type: 'line',
+                        xAxisIndex: 0,
+                        yAxisIndex: 0,
+                        data: test_acc,
+                        smooth: true,
+                        lineStyle: { width: 2 },
+                        itemStyle: { color: '#8AB1D2' },
+                        symbol: 'none'
+                    },
+                    {
+                        name: t.safeAcc,
+                        type: 'line',
+                        xAxisIndex: 1,
+                        yAxisIndex: 1,
+                        data: test_safe_acc,
+                        smooth: true,
+                        lineStyle: { width: 2 },
+                        itemStyle: { color: '#9DD0C7' },
+                        symbol: 'none'
+                    },
+                    {
+                        name: t.toxicAcc,
+                        type: 'line',
+                        xAxisIndex: 2,
+                        yAxisIndex: 2,
+                        data: test_toxic_acc,
+                        smooth: true,
+                        lineStyle: { width: 2 },
+                        itemStyle: { color: '#E58579' },
+                        symbol: 'none'
+                    },
+                    {
+                        name: t.rocAuc,
+                        type: 'line',
+                        xAxisIndex: 3,
+                        yAxisIndex: 3,
+                        data: roc_auc,
+                        smooth: true,
+                        lineStyle: { width: 2 },
+                        itemStyle: { color: '#D9BDD8' },
+                        symbol: 'none'
+                    }
+                ]
+            };
+
+            myChart.clear();
+            myChart.setOption(option);
+        }
+
+        // 初始化
+        async function init() {
+            const data = await loadMetricsData();
+            updateChart(data);
+        }
+
+        // 响应式调整
+        window.addEventListener('resize', function() {
+            myChart.resize();
+        });
+
+        // Language translations
+        const translationsG = {
+            en: {
+                layerPerformance: 'Layer Performance G',
+                loadingMetrics: 'Loading layer metrics...',
+                noMetricsData: 'No metrics data available',
+                testAcc: 'Test Acc',
+                safeAcc: 'Safe Acc',
+                toxicAcc: 'Toxic Acc',
+                rocAuc: 'ROC-AUC'
+            },
+            zh: {
+                layerPerformance: '层级性能 G',
+                loadingMetrics: '正在加载层级指标...',
+                noMetricsData: '暂无指标数据',
+                testAcc: '测试准确率',
+                safeAcc: '安全准确率',
+                toxicAcc: '有害准确率',
+                rocAuc: 'ROC-AUC'
+            }
+        };
+
+        function updatePanelGLanguage(lang) {
+            const t = translationsG[lang];
+            if (!t) return;
+
+            // Update panel header
+            document.querySelector('.panel-title').textContent = t.layerPerformance;
+
+            // Update loading text
+            const loadingEl = document.querySelector('.loading');
+            if (loadingEl) {
+                if (loadingEl.textContent.toLowerCase().includes('loading')) {
+                    loadingEl.textContent = t.loadingMetrics;
+                } else if (loadingEl.textContent.toLowerCase().includes('no')) {
+                    loadingEl.textContent = t.noMetricsData;
+                }
+            }
+
+            // Re-render chart with new language
+            init();
+        }
+
+        // Listen for language change
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'languageChange') {
+                updatePanelGLanguage(event.data.lang);
+            }
+        });
+
+        const savedLangG = localStorage.getItem('language') || 'en';
+        // Ensure default is English
+        if (!localStorage.getItem('language')) {
+            localStorage.setItem('language', 'en');
+        }
+        setTimeout(() => updatePanelGLanguage(savedLangG), 500);
+
+        init();
+    </script>
+</body>
+</html>

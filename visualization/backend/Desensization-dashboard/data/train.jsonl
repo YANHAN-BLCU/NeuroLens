@@ -1,0 +1,100 @@
+{"text": "紧急联系人刘明", "entities": [{"start": 5, "end": 7, "label": "PER"}]}
+{"text": "朱博将于下周到上海市浦东新区金科路433号大厦7栋报到", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 8, "end": 26, "label": "ADDR"}]}
+{"text": "项目经理刘瑞来电反馈问题", "entities": [{"start": 4, "end": 6, "label": "PER"}]}
+{"text": "董华的手机号是15066722344", "entities": [{"start": 0, "end": 2, "label": "PER"}]}
+{"text": "工程师罗建军，户籍地址上海市徐汇区漕溪北路390号广场", "entities": [{"start": 3, "end": 6, "label": "PER"}, {"start": 11, "end": 27, "label": "ADDR"}]}
+{"text": "总部地址河南省郑州市经三路128号小区10栋", "entities": [{"start": 4, "end": 22, "label": "ADDR"}]}
+{"text": "魏静的手机号是15948840994", "entities": [{"start": 0, "end": 2, "label": "PER"}]}
+{"text": "本次会议讨论产品迭代计划，地点另行通知。", "entities": []}
+{"text": "叶晓明与梁娟同住四川省成都市人民南路624号写字楼", "entities": [{"start": 0, "end": 3, "label": "PER"}, {"start": 4, "end": 6, "label": "PER"}, {"start": 7, "end": 24, "label": "ADDR"}]}
+{"text": "请寄至姜凯，天津市和平区解放北路702号产业园", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 23, "label": "ADDR"}]}
+{"text": "客户陈玲，公司位于四川省成都市人民南路217号中心", "entities": [{"start": 2, "end": 4, "label": "PER"}, {"start": 9, "end": 25, "label": "ADDR"}]}
+{"text": "客户邵超反馈，门店在广东省深圳市深南大道763号公寓", "entities": [{"start": 2, "end": 4, "label": "PER"}, {"start": 10, "end": 26, "label": "ADDR"}]}
+{"text": "潘军与廖敏同住上海市徐汇区虹桥路643号写字楼", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 22, "label": "ADDR"}]}
+{"text": "请寄至周航，河南省郑州市经三路258号公寓", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 21, "label": "ADDR"}]}
+{"text": "请于本周五前将材料送至上海市徐汇区龙华中路769号科技园", "entities": [{"start": 11, "end": 28, "label": "ADDR"}]}
+{"text": "收件人：钟伟，地址四川省成都市科华北路781号写字楼", "entities": [{"start": 4, "end": 6, "label": "PER"}, {"start": 9, "end": 26, "label": "ADDR"}]}
+{"text": "彭彤与秦晓明同住广东省广州市黄埔大道西977号公寓", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 3, "end": 6, "label": "PER"}, {"start": 7, "end": 24, "label": "ADDR"}]}
+{"text": "请石晓明签字确认", "entities": [{"start": 1, "end": 4, "label": "PER"}]}
+{"text": "联系人程丽，办公地点上海市浦东新区花木路836号广场", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 26, "label": "ADDR"}]}
+{"text": "范勇将于下周到四川省成都市科华北路894号中心报到", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 8, "end": 24, "label": "ADDR"}]}
+{"text": "贺杰与黎晓明同住河南省郑州市经三路463号广场3栋", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 3, "end": 6, "label": "PER"}, {"start": 7, "end": 24, "label": "ADDR"}]}
+{"text": "收件人毛晨，寄至江苏省南京市中山北路73号大厦2栋", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 8, "end": 25, "label": "ADDR"}]}
+{"text": "客户万博反馈，门店在广东省深圳市高新南一道591号花园16栋", "entities": [{"start": 2, "end": 4, "label": "PER"}, {"start": 10, "end": 30, "label": "ADDR"}]}
+{"text": "收件人：胡平，地址湖南省长沙市韶山南路479号大厦", "entities": [{"start": 4, "end": 6, "label": "PER"}, {"start": 9, "end": 25, "label": "ADDR"}]}
+{"text": "客户常强反馈，门店在江苏省南京市汉中路195号公寓", "entities": [{"start": 2, "end": 4, "label": "PER"}, {"start": 10, "end": 25, "label": "ADDR"}]}
+{"text": "请寄至姜静，河南省郑州市经三路101号大厦", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 21, "label": "ADDR"}]}
+{"text": "本次会议讨论产品迭代计划，地点另行通知。", "entities": []}
+{"text": "请将合同寄给石玲，地址：北京市海淀区学院路389号大厦", "entities": [{"start": 6, "end": 8, "label": "PER"}, {"start": 12, "end": 27, "label": "ADDR"}]}
+{"text": "任浩然与罗娟同住北京市海淀区清华东路754号公寓11栋", "entities": [{"start": 0, "end": 3, "label": "PER"}, {"start": 4, "end": 6, "label": "PER"}, {"start": 7, "end": 26, "label": "ADDR"}]}
+{"text": "收件人：康睿，地址广东省广州市天河路984号公寓6栋", "entities": [{"start": 4, "end": 6, "label": "PER"}, {"start": 9, "end": 26, "label": "ADDR"}]}
+{"text": "段玲的手机号是16187701200", "entities": [{"start": 0, "end": 2, "label": "PER"}]}
+{"text": "请史宇轩签字确认", "entities": [{"start": 1, "end": 4, "label": "PER"}]}
+{"text": "冯磊与程军同住湖北省武汉市光谷大道324号广场20栋", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 25, "label": "ADDR"}]}
+{"text": "请于下周一提交申请材料，无需邮寄。", "entities": []}
+{"text": "联系人于军，办公地点福建省厦门市厦禾路901号商务中心", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 27, "label": "ADDR"}]}
+{"text": "联系人陆翔，办公地点重庆市渝中区解放碑步行街684号公寓4栋", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 30, "label": "ADDR"}]}
+{"text": "朱洋将于下周到四川省成都市红星路620号商务中心报到", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 8, "end": 25, "label": "ADDR"}]}
+{"text": "收货地址：四川省成都市科华北路501号科技园", "entities": [{"start": 5, "end": 22, "label": "ADDR"}]}
+{"text": "请将合同寄给夏娜，地址：北京市朝阳区望京街790号写字楼", "entities": [{"start": 6, "end": 8, "label": "PER"}, {"start": 12, "end": 28, "label": "ADDR"}]}
+{"text": "联系人汪鑫，办公地点天津市和平区南京路115号广场", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 25, "label": "ADDR"}]}
+{"text": "研发部薛洋已完成任务", "entities": [{"start": 3, "end": 5, "label": "PER"}]}
+{"text": "董事长吕娜，门店位于福建省厦门市湖滨南路699号商务中心", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 28, "label": "ADDR"}]}
+{"text": "本次会议讨论产品迭代计划，地点另行通知。", "entities": []}
+{"text": "程艳与杜建军同住湖南省长沙市五一大道274号写字楼", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 3, "end": 6, "label": "PER"}, {"start": 7, "end": 24, "label": "ADDR"}]}
+{"text": "陈涛将于下周到浙江省杭州市天目山路359号科技园报到", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 8, "end": 25, "label": "ADDR"}]}
+{"text": "客户龙建军反馈，门店在四川省成都市人民南路991号科技园", "entities": [{"start": 2, "end": 5, "label": "PER"}, {"start": 11, "end": 28, "label": "ADDR"}]}
+{"text": "金芳的手机号是16333966966", "entities": [{"start": 0, "end": 2, "label": "PER"}]}
+{"text": "请邓文博签字确认", "entities": [{"start": 1, "end": 4, "label": "PER"}]}
+{"text": "仓库位于山东省济南市工业南路621号公寓19栋", "entities": [{"start": 4, "end": 23, "label": "ADDR"}]}
+{"text": "收件人尹睿，户籍地址天津市和平区解放北路373号小区11栋", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 29, "label": "ADDR"}]}
+{"text": "项目经理万玲来电反馈问题", "entities": [{"start": 4, "end": 6, "label": "PER"}]}
+{"text": "请寄至何佳怡，广东省广州市黄埔大道西583号科技园", "entities": [{"start": 3, "end": 6, "label": "PER"}, {"start": 7, "end": 25, "label": "ADDR"}]}
+{"text": "冯晨将于下周到云南省昆明市人民中路477号花园报到", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 8, "end": 24, "label": "ADDR"}]}
+{"text": "请武丽签字确认", "entities": [{"start": 1, "end": 3, "label": "PER"}]}
+{"text": "紧急联系人侯丽", "entities": [{"start": 5, "end": 7, "label": "PER"}]}
+{"text": "董洋的手机号是13542862209", "entities": [{"start": 0, "end": 2, "label": "PER"}]}
+{"text": "培训资料已上传至内部网盘，请自行下载。", "entities": []}
+{"text": "配送至上海市浦东新区花木路425号中心13栋", "entities": [{"start": 3, "end": 22, "label": "ADDR"}]}
+{"text": "包裹收件人马伟，详细地址：上海市徐汇区天钥桥路225号写字楼", "entities": [{"start": 5, "end": 7, "label": "PER"}, {"start": 13, "end": 30, "label": "ADDR"}]}
+{"text": "专员曹磊，工作地点河南省郑州市花园路821号花园", "entities": [{"start": 2, "end": 4, "label": "PER"}, {"start": 9, "end": 24, "label": "ADDR"}]}
+{"text": "仓库位于重庆市渝中区八一路851号公寓", "entities": [{"start": 4, "end": 19, "label": "ADDR"}]}
+{"text": "请于本周五前将材料送至陕西省西安市科技路266号商务中心", "entities": [{"start": 11, "end": 28, "label": "ADDR"}]}
+{"text": "总部地址重庆市渝中区八一路642号商务中心3栋", "entities": [{"start": 4, "end": 23, "label": "ADDR"}]}
+{"text": "联系人许诗涵，办公地点上海市浦东新区世纪大道155号商务中心", "entities": [{"start": 3, "end": 6, "label": "PER"}, {"start": 11, "end": 30, "label": "ADDR"}]}
+{"text": "配送至上海市浦东新区花木路418号产业园", "entities": [{"start": 3, "end": 20, "label": "ADDR"}]}
+{"text": "请将合同寄给戴晨，地址：北京市朝阳区东三环北路390号花园12栋", "entities": [{"start": 6, "end": 8, "label": "PER"}, {"start": 12, "end": 32, "label": "ADDR"}]}
+{"text": "仓库位于湖南省长沙市枫林二路766号公寓", "entities": [{"start": 4, "end": 20, "label": "ADDR"}]}
+{"text": "包裹收件人许芳，详细地址：辽宁省沈阳市建设大路685号小区", "entities": [{"start": 5, "end": 7, "label": "PER"}, {"start": 13, "end": 29, "label": "ADDR"}]}
+{"text": "史玲与毛芳同住上海市浦东新区花木路139号花园9栋", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 24, "label": "ADDR"}]}
+{"text": "包裹收件人于刚，详细地址：辽宁省沈阳市建设大路771号小区3栋", "entities": [{"start": 5, "end": 7, "label": "PER"}, {"start": 13, "end": 31, "label": "ADDR"}]}
+{"text": "陆志强将于下周到江苏省南京市中山北路800号大厦报到", "entities": [{"start": 0, "end": 3, "label": "PER"}, {"start": 9, "end": 25, "label": "ADDR"}]}
+{"text": "张明将于下周到广东省深圳市南山大道686号广场报到", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 8, "end": 24, "label": "ADDR"}]}
+{"text": "联系人袁勇，办公地点云南省昆明市环城南路987号广场", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 26, "label": "ADDR"}]}
+{"text": "请于下周一提交申请材料，无需邮寄。", "entities": []}
+{"text": "研发部吕鹏已完成任务", "entities": [{"start": 3, "end": 5, "label": "PER"}]}
+{"text": "唐明与朱婷同住云南省昆明市翠湖南路816号中心", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 22, "label": "ADDR"}]}
+{"text": "收件人：夏静，地址重庆市渝中区民权路13号小区", "entities": [{"start": 4, "end": 6, "label": "PER"}, {"start": 9, "end": 23, "label": "ADDR"}]}
+{"text": "请将合同寄给魏琪，地址：广东省深圳市南山大道181号公寓", "entities": [{"start": 6, "end": 8, "label": "PER"}, {"start": 12, "end": 28, "label": "ADDR"}]}
+{"text": "研发部金琪已完成任务", "entities": [{"start": 3, "end": 5, "label": "PER"}]}
+{"text": "收货地址：安徽省合肥市潜山路331号商务中心", "entities": [{"start": 5, "end": 22, "label": "ADDR"}]}
+{"text": "包裹收件人田雨桐，详细地址：安徽省合肥市黄山路685号小区", "entities": [{"start": 5, "end": 8, "label": "PER"}, {"start": 14, "end": 29, "label": "ADDR"}]}
+{"text": "请于本周五前将材料送至广东省广州市中山大道218号产业园", "entities": [{"start": 11, "end": 28, "label": "ADDR"}]}
+{"text": "包裹收件人邱华，详细地址：天津市和平区南京路530号商务中心14栋", "entities": [{"start": 5, "end": 7, "label": "PER"}, {"start": 13, "end": 33, "label": "ADDR"}]}
+{"text": "项目经理程瑞来电反馈问题", "entities": [{"start": 4, "end": 6, "label": "PER"}]}
+{"text": "主管张涛，寄至辽宁省沈阳市和平大街314号中心", "entities": [{"start": 2, "end": 4, "label": "PER"}, {"start": 7, "end": 23, "label": "ADDR"}]}
+{"text": "联系人汤婷，办公地点四川省成都市天府大道124号商务中心", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 28, "label": "ADDR"}]}
+{"text": "请将合同寄给武晨，地址：重庆市渝中区中山三路290号广场", "entities": [{"start": 6, "end": 8, "label": "PER"}, {"start": 12, "end": 28, "label": "ADDR"}]}
+{"text": "联系人郑诗涵，办公地点广东省深圳市华强北路47号大厦", "entities": [{"start": 3, "end": 6, "label": "PER"}, {"start": 11, "end": 26, "label": "ADDR"}]}
+{"text": "贺伟", "entities": [{"start": 0, "end": 2, "label": "PER"}]}
+{"text": "客户方艳反馈，门店在北京市海淀区知春路964号花园3栋", "entities": [{"start": 2, "end": 4, "label": "PER"}, {"start": 10, "end": 27, "label": "ADDR"}]}
+{"text": "收件人：崔敏，地址广东省深圳市深南大道831号中心", "entities": [{"start": 4, "end": 6, "label": "PER"}, {"start": 9, "end": 25, "label": "ADDR"}]}
+{"text": "请于下周一提交申请材料，无需邮寄。", "entities": []}
+{"text": "紧急联系人戴翔", "entities": [{"start": 5, "end": 7, "label": "PER"}]}
+{"text": "配送至辽宁省沈阳市三好街931号花园19栋", "entities": [{"start": 3, "end": 21, "label": "ADDR"}]}
+{"text": "收件人：史强，地址浙江省杭州市西湖大道271号广场6栋", "entities": [{"start": 4, "end": 6, "label": "PER"}, {"start": 9, "end": 27, "label": "ADDR"}]}
+{"text": "包裹收件人杜航，详细地址：陕西省西安市长安路34号商务中心10栋", "entities": [{"start": 5, "end": 7, "label": "PER"}, {"start": 13, "end": 32, "label": "ADDR"}]}
+{"text": "联系人萧凯，办公地点安徽省合肥市长江中路436号广场", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 10, "end": 26, "label": "ADDR"}]}
+{"text": "马勇与吕阳同住湖北省武汉市光谷大道128号花园", "entities": [{"start": 0, "end": 2, "label": "PER"}, {"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 22, "label": "ADDR"}]}
+{"text": "新办公室在四川省成都市科华北路553号花园", "entities": [{"start": 5, "end": 21, "label": "ADDR"}]}
+{"text": "请寄至钟航，四川省成都市人民南路94号商务中心", "entities": [{"start": 3, "end": 5, "label": "PER"}, {"start": 6, "end": 23, "label": "ADDR"}]}

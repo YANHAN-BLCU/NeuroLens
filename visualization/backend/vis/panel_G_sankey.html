@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sankey - Jailbreak Sample Tracing</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { padding: 16px; background: #fff; height: 100vh; overflow: auto; }
+        .panel-header { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #333; }
+        #sankey-chart { width: 100%; height: calc(100vh - 80px); min-height: 300px; }
+    </style>
+</head>
+<body>
+    <div class="panel-header">Sample Origin View G</div>
+    <div id="sankey-chart"></div>
+    <script>
+        async function loadData() {
+            try {
+                const response = await fetch('/api/attack_paths');
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+                const nodes = data.nodes || [];
+                const links = data.links || [];
+                if (nodes.length === 0) { console.log('No nodes'); return; }
+                const labels = nodes.map(n => n.label || n.id);
+                const nodeColors = nodes.map(n => {
+                    if (n.type === 'attack') return '#EEC79F';
+                    if (n.type === 'output') return '#A6CDE4';
+                    return '#74B69F';
+                });
+                const sources = links.map(l => {
+                    const idx = nodes.findIndex(n => n.id === l.source);
+                    return idx >= 0 ? idx : 0;
+                });
+                const targets = links.map(l => {
+                    const idx = nodes.findIndex(n => n.id === l.target);
+                    return idx >= 0 ? idx : 0;
+                });
+                const values = links.map(l => l.value || 1);
+                const plotlyData = {
+                    type: 'sankey',
+                    orientation: 'h',
+                    node: { pad: 15, thickness: 20, line: { color: 'black', width: 0.5 }, label: labels, color: nodeColors },
+                    link: { source: sources, target: targets, value: values }
+                };
+                Plotly.newPlot('sankey-chart', [plotlyData], {
+                    title: 'Jailbreak Sample Tracing Path',
+                    font: { size: 12 },
+                    paper_bgcolor: 'white',
+                    plot_bgcolor: 'white',
+                    margin: { l: 10, r: 10, t: 40, b: 40 }
+                }, {responsive: true});
+            } catch (e) {
+                console.error('Panel G load failed:', e);
+            }
+        }
+        window.onload = function() { loadData(); };
+    </script>
+</body>
+</html>

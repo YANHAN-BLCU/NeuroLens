@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neuron View E: Safety Neuron Connectivity</title>
+    <script src="/vis/d3.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px; /* 与 Layer View D 标题对齐 */
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .panel-subtitle {
+            font-size: 12px;
+            color: #6b7280;
+            margin-left: 8px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        select {
+            padding: 6px 10px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 12px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .quadrant-filters {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 12px;
+            flex-shrink: 0;
+            margin-top: -10px; /* 轻微上移按钮 */
+        }
+
+        .quadrant-btn {
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid;
+            transition: all 0.2s;
+        }
+
+        .quadrant-btn.active {
+            opacity: 1;
+        }
+
+        .quadrant-btn.inactive {
+            opacity: 0.4;
+        }
+
+        /* 象限按钮使用与节点相同的配色 */
+        .quadrant-btn.S\+A\+ {
+            background: #ffffff !important; /* S+A+：倾向有害 + 实际有害 */
+            border-color: #374151 !important;
+            color: #374151 !important;
+        }
+
+        .quadrant-btn.S-A\+ {
+            background: #ffffff !important; /* S-A+：倾向防御 + 实际有害 */
+            border-color: #374151 !important;
+            color: #374151 !important;
+        }
+
+        .quadrant-btn.S-A- {
+            background: #ffffff!important; /* S-A-：倾向防御 + 实际防御 */
+            border-color: #374151 !important;
+            color: #374151 !important;
+        }
+
+        .quadrant-btn.S\+A- {
+            background: #ffffff !important; /* S+A-：倾向有害 + 实际防御 */
+            border-color: #374151 !important;
+            color: #374151 !important;
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #neuronChart {
+            width: 100%;
+            height: 100%;
+        }
+
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 11px;
+            color: #6b7280;
+            flex-shrink: 0;
+        }
+
+        .info-panel {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 11px;
+            margin-top: 12px;
+            flex-shrink: 0;
+        }
+
+        .info-panel-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #374151;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+
+        .info-item {
+            color: #6b7280;
+        }
+
+        .info-value {
+            color: #111827;
+            font-weight: 500;
+        }
+
+        .corner-tag {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: rgba(17, 24, 39, 0.8);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            z-index: 10;
+        }
+
+        .tooltip {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.95);
+            color: #e5e7eb;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 11px;
+            pointer-events: none;
+            z-index: 100;
+            max-width: 220px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .tooltip-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+
+        .tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 2px;
+        }
+
+        .tooltip-label {
+            color: #9ca3af;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 16px;
+            margin-top: 8px;
+            font-size: 10px;
+            color: #6b7280;
+            flex-shrink: 0;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            width: calc(50% - 8px); /* 两列布局，每行两个 */
+        }
+
+        .legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div class="panel-header">
+        <div>
+            <span class="panel-title">Neuron View E</span>
+        </div>
+        <div class="controls">
+            <select id="layerSelect">
+                <option value="1">Layer 1</option>
+                <option value="4">Layer 4</option>
+                <option value="8">Layer 8</option>
+                <option value="12">Layer 12</option>
+                <option value="16">Layer 16</option>
+                <option value="20">Layer 20</option>
+                <option value="24">Layer 24</option>
+                <option value="28">Layer 28</option>
+                <option value="31">Layer 31</option>
+                <option value="32">Layer 32</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="status-bar" id="statusText">
+        <div class="quadrant-filters" id="quadrantFilters">
+            <button class="quadrant-btn S+A+ active" data-quadrant="S+A+">S+A+</button>
+            <button class="quadrant-btn S-A+ active" data-quadrant="S-A+">S-A+</button>
+            <button class="quadrant-btn S-A- active" data-quadrant="S-A-">S-A-</button>
+            <button class="quadrant-btn S+A- active" data-quadrant="S+A-">S+A-</button>
+        </div>
+        <span>Total Number of Dedicated Safety Neurons: <span id="totalCount">0</span></span>
+    </div>
+
+    <div class="chart-container">
+        <div id="neuronChart"></div>
+        <div class="loading" id="loadingText">正在加载神经元数据...</div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#9DD0C7"></div>S-A+:Safety-oriented, harmful</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#D9BDD8"></div>S+A+:Harm-prone, harmful</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#E58579"></div>S+A-:Harm-prone, defensive</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#8AB1D2"></div>S-A-:Safety-oriented, defensive</div>
+        </div>
+
+    <div class="info-panel" id="infoPanel" style="display: none;">
+        <div class="info-panel-title">Selected neuron: <span id="selectedNeuronName"></span></div>
+        <div class="info-grid">
+            <div class="info-item">Layer: <span class="info-value" id="selectedLayer">-</span></div>
+            <div class="info-item">Index: <span class="info-value" id="selectedIndex">-</span></div>
+            <div class="info-item">Quadrant: <span class="info-value" id="selectedQuadrant">-</span></div>
+            <div class="info-item">Alignment: <span class="info-value" id="selectedAlignment">-</span></div>
+            <div class="info-item">Activation projection: <span class="info-value" id="selectedActivation">-</span></div>
+            <div class="info-item">Activation difference: <span class="info-value" id="selectedActivationDiff">-</span></div>
+            <div class="info-item">Dedicated safety: <span class="info-value" id="selectedDedicated">-</span></div>
+            <div class="info-item">Upstream connections: <span class="info-value" id="selectedUpstream">-</span></div>
+        </div>
+    </div>
+
+    <div class="tooltip" id="tooltip" style="display: none;"></div>
+
+    <script>
+        // 象限颜色配置
+        const quadrantColors = {
+            'S+A+': '#D9BDD8',
+            'S-A+': '#9DD0C7',
+            'S+A-': '#E58579',
+            'S-A-': '#8AB1D2'
+        };
+
+        // 数据缓存
+        let quadrantData = null;
+        let alignmentData = null;
+        let gradientData = null;
+        let gradientVisData = null;
+        let dedicatedData = null;
+        let combinedNeurons = {};
+        let filteredNeurons = [];
+        let selectedNeuron = null;
+        let activeQuadrants = [];
+        let simulation = null;
+        let node = null;
+        let linkSelection = null; // 存放连线 selection，方便拖拽时更新
+        let currentLinks = []; // 当前层的连线数据，包含相关强度
+        let centerX = 0;
+        let centerY = 0;
+        let innerRingRadius = 0;
+
+        const chartContainer = document.getElementById('neuronChart');
+        const loadingText = document.getElementById('loadingText');
+        const tooltip = document.getElementById('tooltip');
+        const infoPanel = document.getElementById('infoPanel');
+
+        // 创建SVG画布
+        const svg = d3.select('#neuronChart')
+            .append('svg')
+            .attr('width', '100%')
+            .attr('height', '100%');
+
+        const container = svg.append('g');
+
+        // 缩放行为
+        const zoom = d3.zoom()
+            .scaleExtent([0.1, 4])
+            .on('zoom', (event) => {
+                container.attr('transform', event.transform);
+            });
+
+        svg.call(zoom);
+
+        // 加载所有数据
+        async function loadAllData() {
+            const [quadrantResp, alignmentResp, gradientResp, dedicatedResp, gradientVisResp] = await Promise.all([
+                // 数据位于 visualization/outputs/ 目录
+                fetch('../outputs/quadrant_classification/quadrant_classification.json'),
+                fetch('../outputs/parameter_alignment/parameter_alignment.json'),
+                fetch('../outputs/gradient_dependency/gradient_dependency.json'),
+                fetch('../outputs/dedicated_safety_neurons.json'),
+                // 可视化用的梯度强度数据（包含每条边的相关程度）
+                fetch('../outputs/gradient_dependency/gradient_dependency_visualization.json')
+            ]);
+
+            if (!quadrantResp.ok || !alignmentResp.ok || !gradientResp.ok || !dedicatedResp.ok || !gradientVisResp.ok) {
+                throw new Error("Failed to load some data");
+            }
+
+            return {
+                quadrant: await quadrantResp.json(),
+                alignment: await alignmentResp.json(),
+                gradient: await gradientResp.json(),
+                dedicated: await dedicatedResp.json(),
+                gradientVis: await gradientVisResp.json()
+            };
+        }
+
+        // 组合所有数据源
+        function combineAllData(data) {
+            const neurons = {};
+            const dedicatedKeys = new Set(Object.keys(data.dedicated.dedicated_safety_neurons));
+
+            // 1. 从 quadrant_classification 提取象限和激活信息
+            for (const [key, qData] of Object.entries(data.quadrant)) {
+                const parts = key.replace('layer_', '').split('_neuron_');
+                const layer = parseInt(parts[0]);
+                const neuronIdx = parseInt(parts[1]);
+                const id = `${layer}_${neuronIdx}`;
+
+                neurons[id] = {
+                    id: id,
+                    key: id,
+                    layer: layer,
+                    index: neuronIdx,
+                    quadrant: qData.quadrant,
+                    alignment: qData.alignment,
+                    alignment_type: qData.alignment_type,
+                    activation_projection: qData.activation_projection,
+                    activation_diff: qData.activation_diff,
+                    activation_type: qData.activation_type,
+                    is_dedicated_safety: dedicatedKeys.has(id),
+                    connections: [],
+                    connections_loaded: false
+                };
+            }
+
+            // 2. 从 parameter_alignment 添加对齐信息
+            for (const [key, aData] of Object.entries(data.alignment)) {
+                const parts = key.replace('layer_', '').split('_neuron_');
+                const layer = parseInt(parts[0]);
+                const neuronIdx = parseInt(parts[1]);
+                const id = `${layer}_${neuronIdx}`;
+
+                if (neurons[id]) {
+                    neurons[id].cosine_similarity = aData.cosine_similarity;
+                    neurons[id].alignment_type = aData.alignment_type;
+                    neurons[id].neuron_weight_norm = aData.neuron_weight_norm;
+                    neurons[id].toxic_vector_norm = aData.toxic_vector_norm;
+                }
+            }
+
+            // 3. 从 gradient_dependency 添加上游连接
+            for (const [key, gData] of Object.entries(data.gradient)) {
+                const parts = key.replace('layer_', '').split('_neuron_');
+                const layer = parseInt(parts[0]);
+                const neuronIdx = parseInt(parts[1]);
+                const id = `${layer}_${neuronIdx}`;
+
+                if (neurons[id] && gData.upstream_neurons) {
+                    neurons[id].upstream = gData.upstream_neurons.map(n => `${n.layer_idx}_${n.neuron_idx}`);
+                }
+            }
+
+            return neurons;
+        }
+
+        // 获取指定层的神经元
+        function getNeuronsByLayer(layer) {
+            if (!combinedNeurons) return [];
+            return Object.values(combinedNeurons).filter(n => n.layer === layer);
+        }
+
+        // 获取神经元间的连接：
+        // - 灰色小球：上一层（layer-1）中“专用安全神经元”里最重要的 18 个（来自 dedicated_safety_neurons.json）
+        // - 彩色小球：本层神经元
+        // - 连边：只允许「上一层灰色小球 → 本层彩色小球」，灰色小球之间、本层彩色小球之间都不连
+        function getConnectionsForLayer(layer, neurons) {
+            const prevLayer = layer - 1;
+            const links = [];
+
+            if (!dedicatedData || !dedicatedData.dedicated_safety_neurons) {
+                return { links, topUpstreamIds: [] };
+            }
+
+            // 1. 先从 dedicated_safety_neurons.json 里选出“上一层”的专用安全神经元，
+            //    按 rank 从小到大排序，取前 18 个作为“最重要的上一层安全神经元”
+            const prevLayerSafety = Object.entries(dedicatedData.dedicated_safety_neurons)
+                .filter(([, info]) => info.layer === prevLayer)
+                .sort(([, a], [, b]) => (a.rank ?? Infinity) - (b.rank ?? Infinity))
+                .slice(0, 18);
+
+            const topUpstreamIds = prevLayerSafety.map(([id]) => id); // 形如 "30_1384"
+
+            const topSet = new Set(topUpstreamIds);
+            // 2. 在 gradient_dependency 中，只保留「上一层 top 18 专用安全神经元 → 本层神经元」的连边，
+            //    并从 gradient_dependency_visualization.json 中取出对应的梯度强度，作为“相关程度”
+            neurons.forEach(neuron => {
+                if (!neuron.upstream) return;
+
+                // 当前目标神经元在 gradient_dependency_visualization.json 中的 key
+                let gradVisEntry = null;
+                if (gradientVisData) {
+                    const gradKey = `layer_${neuron.layer}_neuron_${neuron.index}`;
+                    gradVisEntry = gradientVisData[gradKey] || null;
+                }
+
+                neuron.upstream.forEach(upstreamId => {
+                    const [upLayerStr, upIdxStr] = upstreamId.split('_');
+                    const upLayer = parseInt(upLayerStr);
+                    const upIdx = parseInt(upIdxStr);
+
+                    if (upLayer === prevLayer && topSet.has(upstreamId)) {
+                        let strength = null;
+
+                        // 从 gradient_dependency_visualization.json 里查找对应的梯度强度
+                        if (gradVisEntry && Array.isArray(gradVisEntry.upstream_neurons) && Array.isArray(gradVisEntry.gradient_strengths)) {
+                            const idx = gradVisEntry.upstream_neurons.findIndex(
+                                pair => Array.isArray(pair) && pair[0] === upLayer && pair[1] === upIdx
+                            );
+                            if (idx >= 0 && idx < gradVisEntry.gradient_strengths.length) {
+                                strength = gradVisEntry.gradient_strengths[idx];
+                            }
+                        }
+
+                        links.push({
+                            source: upstreamId,   // 上一层重要神经元
+                            target: neuron.id,    // 本层神经元
+                            strength: strength    // 相关程度（可为空）
+                        });
+                    }
+                });
+            });
+
+            return { links, topUpstreamIds };
+        }
+
+        // 渲染力导向图
+        function renderChart(layer) {
+            const width = chartContainer.clientWidth;
+            const height = chartContainer.clientHeight || 500;
+
+            // 清空之前的内容
+            container.selectAll('*').remove();
+
+            // 获取该层神经元
+            let neurons = getNeuronsByLayer(layer);
+
+            // 按象限过滤
+            if (activeQuadrants.length > 0) {
+                neurons = neurons.filter(n => activeQuadrants.includes(n.quadrant));
+            }
+
+            // 按原始索引排序
+            neurons.sort((a, b) => a.index - b.index);
+
+            // 限制显示数量
+            if (neurons.length > 120) {
+                neurons = neurons.slice(0, 120);
+            }
+
+            // 更新状态
+            document.getElementById('totalCount').textContent = neurons.length;
+
+            // 创建本层节点（彩色小球）
+            const nodes = neurons.map(n => ({...n}));
+
+            // 根据 gradient_dependency 计算“上一层 top 18 → 本层”的真实连接
+            const { links, topUpstreamIds } = getConnectionsForLayer(layer, neurons);
+
+            // 计算圆形轨道位置
+            centerX = width / 2;
+            centerY = height / 2;
+            const orbitRadius = Math.min(width, height) * 0.5;
+
+            // 按索引顺序设置每个节点在轨道上的位置
+            // 同类神经元放在一起
+            const quadrantOrder = ['S+A+', 'S-A+', 'S-A-', 'S+A-'];
+            const sortedNodes = [...nodes].sort((a, b) => {
+                const aIdx = quadrantOrder.indexOf(a.quadrant);
+                const bIdx = quadrantOrder.indexOf(b.quadrant);
+                if (aIdx !== bIdx) return aIdx - bIdx;
+                return a.index - b.index;
+            });
+            sortedNodes.forEach((n, i) => {
+                const angle = (i / nodes.length) * 2 * Math.PI - Math.PI / 2;
+                n.x = centerX + orbitRadius * Math.cos(angle);
+                n.y = centerY + orbitRadius * Math.sin(angle);
+            });
+
+            // 创建力导向模拟（只对本层节点起作用）
+            simulation = d3.forceSimulation(nodes)
+                .force('charge', d3.forceManyBody().strength(-30))
+                // 圆形轨道引力 - 保持神经元在轨道附近
+                .force('radial', d3.forceRadial(orbitRadius, centerX, centerY).strength(0.8))
+                .force('collision', d3.forceCollide().radius(d => {
+                    const safeBonus = d.is_dedicated_safety ? 5 : 0;
+                    const size = d.index * 0.05 + 2 + safeBonus;
+                    return Math.max(2, Math.min(size, 10));
+                }))
+                .alpha(1)
+                .restart();
+
+            // 绘制轨道
+            container.append('circle')
+                .attr('cx', centerX)
+                .attr('cy', centerY)
+                .attr('r', orbitRadius)
+                .attr('fill', 'none')
+                .attr('stroke', '#9ca3af')
+                .attr('stroke-opacity', 0.2)
+                .attr('stroke-dasharray', '4,4');
+
+            // 在圆圈内部生成“上一层神经元”灰色小球：
+            // 根据上一层 top 18 upstream 节点来生成。
+            const innerRadius = orbitRadius * 0.3;
+
+            // 在灰色小球外围画一个稍大一点的浅灰色圆环
+            innerRingRadius = innerRadius * 1.15;
+            container.append('circle')
+                .attr('cx', centerX)
+                .attr('cy', centerY)
+                .attr('r', innerRingRadius)
+                .attr('fill', '#e5e7eb')
+                .attr('fill-opacity', 0.6);
+            let innerNodes = [];
+            if (topUpstreamIds.length > 0) {
+                innerNodes = topUpstreamIds.map((id, i) => {
+                    const angle = (i / topUpstreamIds.length) * 2 * Math.PI - Math.PI / 2;
+                    const x = centerX + innerRadius * Math.cos(angle);
+                    const y = centerY + innerRadius * Math.sin(angle);
+
+                    // 尝试从 combinedNeurons 里拿到该上一层神经元的详细数据（如果它本身也是被标记的专用安全神经元）
+                    const base = combinedNeurons[id] || {};
+                    const [upLayerStr, upIdxStr] = id.split('_');
+
+                    return {
+                        id: id,
+                        key: id,
+                        layer: base.layer || parseInt(upLayerStr),
+                        index: base.index != null ? base.index : parseInt(upIdxStr),
+                        quadrant: base.quadrant || 'UPSTREAM', // 根据 quadrant_classification 填写象限，缺失时标记为 UPSTREAM
+                        alignment: base.alignment || base.cosine_similarity || 0,
+                        activation_projection: base.activation_projection || 0,
+                        activation_diff: base.activation_diff || 0,
+                        is_dedicated_safety: true,
+                        upstream: base.upstream || [],
+                        is_upstream: true,
+                        x: x,
+                        y: y
+                    };
+                });
+            }
+
+            // 外圈真实神经元 + 内圈灰色小球，一起参与交互（但力导向只作用于外圈节点）
+            const allNodes = nodes.concat(innerNodes);
+
+            // 方便在 tick 中通过 id 查找坐标
+            const nodeById = new Map(allNodes.map(d => [d.id, d]));
+
+            // 绘制链接（初始为中性样式，真正的强度编码在点击高亮时进行）
+            linkSelection = container.append('g')
+                .selectAll('line')
+                .data(links)
+                .join('line')
+                .attr('stroke', '#9ca3af')
+                .attr('stroke-opacity', 0.25)
+                .attr('stroke-width', 1);
+
+            // 保存当前连线数据，供点击高亮时根据相关程度调整粗细
+            currentLinks = links;
+
+            // 绘制节点组（包含外圈真实神经元 + 内圈灰色小球）
+            node = container.append('g')
+                .selectAll('g')
+                .data(allNodes)
+                .join('g')
+                .style('cursor', 'pointer')
+                .call(d3.drag()
+                    .on('start', dragstarted)
+                    .on('drag', dragged)
+                    .on('end', dragended));
+
+            // 绘制节点圆形：
+            // - 上层神经元：灰色小球
+            // - 本层神经元：按象限着色（红/蓝等）
+            node.append('circle')
+                .attr('r', d => {
+                    // 上层灰色小球：固定较大尺寸
+                    if (d.is_upstream) {
+                        return 6;
+                    }
+                    // 外圈彩色小球：整体略大于内圈灰色小球
+                    const safeBonus = d.is_dedicated_safety ? 4 : 0;
+                    const size = 6.4 + d.index * 0.02 + safeBonus;
+                    return Math.max(6.4, Math.min(size, 10));
+                })
+                .attr('fill', d => d.is_upstream ? '#9ca3af' : (quadrantColors[d.quadrant] || '#9ca3af'))
+                // 灰色小球去掉描边
+                .attr('stroke', d => d.is_upstream ? 'none' : '#fff')
+                .attr('stroke-width', d => d.is_upstream ? 0 : 1.5);
+
+            // 节点悬停显示tooltip
+            node.on('mouseenter', (event, d) => {
+                showTooltip(event, d);
+            })
+            .on('mousemove', (event, d) => {
+                moveTooltip(event);
+            })
+            .on('mouseleave', () => {
+                hideTooltip();
+            });
+
+            // 节点点击事件
+            node.on('click', (event, d) => {
+                event.stopPropagation();
+                selectNeuron(d);
+            });
+
+            // 更新位置
+            simulation.on('tick', () => {
+                linkSelection
+                    .attr('x1', d => (nodeById.get(d.source) || {}).x)
+                    .attr('y1', d => (nodeById.get(d.source) || {}).y)
+                    .attr('x2', d => (nodeById.get(d.target) || {}).x)
+                    .attr('y2', d => (nodeById.get(d.target) || {}).y);
+
+                node
+                    .attr('transform', d => `translate(${d.x}, ${d.y})`);
+            });
+
+            // 点击背景取消选择
+            svg.on('click', () => {
+                selectedNeuron = null;
+                infoPanel.style.display = 'none';
+                if (node) {
+                    node.selectAll('circle')
+                        .attr('stroke', n => n.is_upstream ? 'none' : '#fff')
+                        .attr('stroke-width', n => n.is_upstream ? 0 : 1.5);
+                }
+
+                // 恢复连线默认样式
+                if (linkSelection) {
+                    linkSelection
+                        .attr('stroke-opacity', 0.35)
+                        .attr('stroke-width', 1);
+                    }
+                });
+            }
+
+        // Show tooltip
+        function showTooltip(event, d) {
+            const lang = localStorage.getItem('language') || 'en';
+            const t = translationsE[lang] || translationsE.en;
+            const neuronLabel = t.neuronLabel || 'Neuron';
+            
+            tooltip.innerHTML = `
+                <div class="tooltip-title">${neuronLabel} ${d.key}</div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">${t.layer}:</span>
+                    <span>${d.layer}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">${t.index}:</span>
+                    <span>${d.id}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">${t.quadrant}:</span>
+                    <span>${d.quadrant}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">${t.alignment}:</span>
+                    <span>${(d.alignment || d.cosine_similarity || 0).toFixed(4)}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">${t.activationProjection}:</span>
+                    <span>${(d.activation_projection || 0).toFixed(4)}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">${t.activationDiff}:</span>
+                    <span>${(d.activation_diff || 0).toFixed(4)}</span>
+                </div>
+            `;
+            tooltip.style.display = 'block';
+            moveTooltip(event);
+        }
+
+        function moveTooltip(event) {
+            const x = event.pageX + 15;
+            const y = event.pageY + 15;
+            tooltip.style.left = x + 'px';
+            tooltip.style.top = y + 'px';
+        }
+
+        function hideTooltip() {
+            tooltip.style.display = 'none';
+        }
+
+        // 选择神经元
+        function selectNeuron(d) {
+            selectedNeuron = d;
+
+            // 更新信息面板
+            document.getElementById('selectedNeuronName').textContent = d.key;
+            document.getElementById('selectedLayer').textContent = d.layer;
+            document.getElementById('selectedIndex').textContent = d.id;
+            document.getElementById('selectedQuadrant').textContent = d.quadrant;
+            document.getElementById('selectedAlignment').textContent = (d.alignment || d.cosine_similarity || 0).toFixed(4);
+            document.getElementById('selectedActivation').textContent = (d.activation_projection || 0).toFixed(4);
+            document.getElementById('selectedActivationDiff').textContent = (d.activation_diff || 0).toFixed(4);
+            document.getElementById('selectedDedicated').textContent = d.is_dedicated_safety ? 'Yes' : 'No';
+            document.getElementById('selectedUpstream').textContent = d.upstream ? d.upstream.length : 0;
+            infoPanel.style.display = 'block';
+
+            // 更新节点样式
+            if (node) {
+                node.selectAll('circle')
+                    .attr('stroke', n => {
+                        // 选中时：灰色小球恢复白色描边，其它按选中状态高亮
+                        if (n.id === d.id) return '#2563eb';
+                        if (n.is_upstream) return '#fff';
+                        return '#fff';
+                    })
+                    .attr('stroke-width', n => {
+                        if (n.id === d.id) return 3;
+                        if (n.is_upstream) return 1.5;
+                        return 1.5;
+                    });
+            }
+
+            // 高亮与当前选中节点相关的连线：
+            // - 若点击的是内侧灰色小球（上一层神经元）：高亮它发出的所有连线（source === d.id）
+            // - 若点击的是外圈彩色小球（本层神经元）：高亮所有指向它的连线（target === d.id）
+            // 同时根据梯度强度（相关程度）调整线条粗细 + 颜色
+            if (linkSelection) {
+                // 先统计与当前节点相关的所有连线的强度范围
+                let relatedLinks = [];
+                if (currentLinks && Array.isArray(currentLinks)) {
+                    relatedLinks = currentLinks.filter(l =>
+                        d.is_upstream ? l.source === d.id : l.target === d.id
+                    );
+                }
+
+                const strengths = relatedLinks
+                    .map(l => l.strength)
+                    .filter(s => typeof s === 'number' && isFinite(s));
+
+                const hasStrength = strengths.length > 0;
+                const maxStrength = hasStrength ? Math.max(...strengths) : 1;
+                const minStrength = hasStrength ? Math.min(...strengths) : 0;
+                const strengthRange = Math.max(maxStrength - minStrength, 1e-6);
+
+                linkSelection
+                    .attr('stroke-opacity', l => {
+                        const isRelated = d.is_upstream ? l.source === d.id : l.target === d.id;
+                        return isRelated ? 1.0 : 0.05;
+                    })
+                    .attr('stroke', l => {
+                        const isRelated = d.is_upstream ? l.source === d.id : l.target === d.id;
+                        if (!isRelated || !hasStrength || typeof l.strength !== 'number' || !isFinite(l.strength)) {
+                            // 未相关或无强度信息：统一浅灰
+                            return '#d4d4d8'; // 浅灰
+                        }
+
+                        // 将强度归一化到 [0, 1]
+                        const norm = (l.strength - minStrength) / strengthRange;
+
+                        // 使用单一灰度：整体偏浅，弱为很浅灰，强为中灰
+                        const minGray = 240; // 最浅（接近白）
+                        const maxGray = 140; // 最深（中等灰）
+                        const g = Math.round(minGray + (maxGray - minGray) * norm);
+                        return `rgb(${g},${g},${g})`;
+                    })
+                    .attr('stroke-width', l => {
+                        const isRelated = d.is_upstream ? l.source === d.id : l.target === d.id;
+                        if (!isRelated) {
+                            return 0.6;
+                        }
+
+                        if (!hasStrength || typeof l.strength !== 'number' || !isFinite(l.strength)) {
+                            // 没有强度信息时使用较温和的高亮粗细
+                            return 2.0;
+                        }
+
+                        // 将强度映射到较窄的线宽范围，例如 [1.6, 2.8]，减弱粗细对比
+                        const norm = (l.strength - minStrength) / strengthRange;
+                        return 1.6 + norm * 1.2;
+                    });
+            }
+        }
+
+        // 拖拽函数
+        function dragstarted(event, d) {
+            // 外圈彩色小球使用力导向拖拽，灰色小球只在内圈里自由拖动，不参与力导向
+            if (!d.is_upstream) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+        }
+
+        function dragged(event, d) {
+            if (d.is_upstream) {
+                // 灰色小球：限制在灰色圆环内
+                let dx = event.x - centerX;
+                let dy = event.y - centerY;
+                let r = Math.sqrt(dx * dx + dy * dy) || 1;
+                const maxR = innerRingRadius;
+
+                if (r > maxR) {
+                    const k = maxR / r;
+                    dx *= k;
+                    dy *= k;
+                }
+
+                d.x = centerX + dx;
+                d.y = centerY + dy;
+
+                // 更新自身位置
+                d3.select(this).attr('transform', `translate(${d.x}, ${d.y})`);
+
+                // 更新与该灰色小球相连的连线起点
+                if (linkSelection) {
+                    linkSelection
+                        .filter(l => l.source === d.id)
+                        .attr('x1', d.x)
+                        .attr('y1', d.y);
+                }
+            } else {
+                // 外圈彩色小球：仍然使用力导向的拖拽方式
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+        }
+
+        function dragended(event, d) {
+            if (!d.is_upstream) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+        }
+
+        // 初始化
+        async function init() {
+            try {
+                const data = await loadAllData();
+                quadrantData = data.quadrant;
+                alignmentData = data.alignment;
+                gradientData = data.gradient;
+                dedicatedData = data.dedicated;
+                gradientVisData = data.gradientVis;
+
+                // 组合所有数据
+                combinedNeurons = combineAllData(data);
+
+                loadingText.style.display = 'none';
+
+                // 绑定事件
+                document.getElementById('layerSelect').addEventListener('change', function() {
+                    renderChart(parseInt(this.value));
+                });
+
+                // 象限过滤器
+                document.querySelectorAll('.quadrant-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const quadrant = this.dataset.quadrant;
+                        this.classList.toggle('active');
+                        this.classList.toggle('inactive');
+
+                        if (activeQuadrants.includes(quadrant)) {
+                            activeQuadrants = activeQuadrants.filter(q => q !== quadrant);
+                        } else {
+                            activeQuadrants.push(quadrant);
+                        }
+
+                        const layer = parseInt(document.getElementById('layerSelect').value);
+                        renderChart(layer);
+                    });
+                });
+
+                // 初始渲染
+                renderChart(1);
+
+            } catch (error) {
+                console.error('Initialization failed:', error);
+                loadingText.textContent = 'Failed to load data: ' + error.message;
+            }
+        }
+
+        // 响应式调整
+        window.addEventListener('resize', () => {
+            const layer = parseInt(document.getElementById('layerSelect').value);
+            renderChart(layer);
+        });
+
+        // Language translations for panel E
+        const translationsE = {
+            en: {
+                neuronView: 'Neuron View E',
+                loadingText: 'Loading neuron data...',
+                totalCount: 'Total Number of Dedicated Safety Neurons:',
+                selectedNeuron: 'Selected neuron:',
+                legendSAp: 'S-A+:Safety-oriented, harmful',
+                legendSAMP: 'S+A+:Harm-prone, harmful',
+                legendSAM: 'S+A-:Harm-prone, defensive',
+                legendS_AM: 'S-A-:Safety-oriented, defensive',
+                layer: 'Layer',
+                index: 'Index',
+                quadrant: 'Quadrant',
+                alignment: 'Alignment',
+                activationProjection: 'Activation projection',
+                activationDiff: 'Activation difference',
+                dedicatedSafety: 'Dedicated safety',
+                upstreamConnections: 'Upstream connections',
+                neuronLabel: 'Neuron'
+            },
+            zh: {
+                neuronView: '神经元视图 E',
+                loadingText: '正在加载神经元数据...',
+                totalCount: '专用安全神经元总数：',
+                selectedNeuron: '已选神经元：',
+                legendSAp: 'S-A+:倾向防御+实际有害',
+                legendSAMP: 'S+A+:倾向有害+实际有害',
+                legendSAM: 'S+A-:倾向有害+实际防御',
+                legendS_AM: 'S-A-:倾向防御+实际防御',
+                layer: '层',
+                index: '索引',
+                quadrant: '象限',
+                alignment: '对齐度',
+                activationProjection: '激活投影',
+                activationDiff: '激活差异',
+                dedicatedSafety: '专用安全',
+                upstreamConnections: '上游连接',
+                neuronLabel: '神经元'
+            }
+        };
+
+        function updatePanelELanguage(lang) {
+            const t = translationsE[lang];
+            if (!t) return;
+
+            // Update panel title
+            document.querySelector('.panel-title').textContent = t.neuronView;
+
+            if (loadingText) loadingText.textContent = t.loadingText;
+            if (document.getElementById('totalCount')) {
+                // Update the count while preserving the number
+                const countEl = document.getElementById('totalCount');
+                const count = countEl.textContent;
+                document.querySelector('#statusText > span').textContent = t.totalCount + ' ';
+                document.querySelector('#statusText > span').appendChild(countEl);
+            }
+
+            // Update legend
+            const legendItems = document.querySelectorAll('.legend-item');
+            if (legendItems[0]) legendItems[0].innerHTML = `<div class="legend-dot" style="background:#9DD0C7"></div>${t.legendSAp}`;
+            if (legendItems[1]) legendItems[1].innerHTML = `<div class="legend-dot" style="background:#D9BDD8"></div>${t.legendSAMP}`;
+            if (legendItems[2]) legendItems[2].innerHTML = `<div class="legend-dot" style="background:#E58579"></div>${t.legendSAM}`;
+            if (legendItems[3]) legendItems[3].innerHTML = `<div class="legend-dot" style="background:#8AB1D2"></div>${t.legendS_AM}`;
+
+            // Update layer select options text
+            const layerSelect = document.getElementById('layerSelect');
+            if (layerSelect) {
+                Array.from(layerSelect.options).forEach(opt => {
+                    const layerVal = opt.value;
+                    if (!layerVal) return;
+                    const n = parseInt(layerVal, 10);
+                    if (Number.isNaN(n)) return;
+                    if (lang === 'zh') {
+                        // 中文：第 N 层
+                        opt.textContent = `层 ${n}`;
+                    } else {
+                        // 英文：Layer N
+                        opt.textContent = `${t.layer} ${n}`;
+                    }
+                });
+            }
+
+            // Update info panel
+            const infoItems = document.querySelectorAll('.info-item');
+            if (infoItems[0]) infoItems[0].innerHTML = `${t.layer}: <span class="info-value" id="selectedLayer">-</span>`;
+            if (infoItems[1]) infoItems[1].innerHTML = `${t.index}: <span class="info-value" id="selectedIndex">-</span>`;
+            if (infoItems[2]) infoItems[2].innerHTML = `${t.quadrant}: <span class="info-value" id="selectedQuadrant">-</span>`;
+            if (infoItems[3]) infoItems[3].innerHTML = `${t.alignment}: <span class="info-value" id="selectedAlignment">-</span>`;
+            if (infoItems[4]) infoItems[4].innerHTML = `${t.activationProjection}: <span class="info-value" id="selectedActivation">-</span>`;
+            if (infoItems[5]) infoItems[5].innerHTML = `${t.activationDiff}: <span class="info-value" id="selectedActivationDiff">-</span>`;
+            if (infoItems[6]) infoItems[6].innerHTML = `${t.dedicatedSafety}: <span class="info-value" id="selectedDedicated">-</span>`;
+            if (infoItems[7]) infoItems[7].innerHTML = `${t.upstreamConnections}: <span class="info-value" id="selectedUpstream">-</span>`;
+
+            // Update info panel title
+            const infoPanelTitle = document.querySelector('.info-panel-title');
+            if (infoPanelTitle) {
+                infoPanelTitle.innerHTML = `${t.selectedNeuron} <span id="selectedNeuronName"></span>`;
+            }
+        }
+
+        // Listen for language change from parent
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'languageChange') {
+                updatePanelELanguage(event.data.lang);
+            }
+        });
+
+        // Also check localStorage for initial language
+        const savedLang = localStorage.getItem('language') || 'en';
+        // Ensure default is English
+        if (!localStorage.getItem('language')) {
+            localStorage.setItem('language', 'en');
+        }
+        setTimeout(() => updatePanelELanguage(savedLang), 500);
+
+        init();
+    </script>
+</body>
+</html>

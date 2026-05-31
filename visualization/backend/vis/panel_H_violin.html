@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Violin - Neuron Activation Distribution</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { padding: 16px; background: #fff; height: 100vh; overflow: auto; }
+        .panel-header { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: #333; }
+        #violin-chart { width: 100%; height: calc(100vh - 80px); min-height: 300px; }
+    </style>
+</head>
+<body>
+    <div class="panel-header">Activation Difference View H</div>
+    <div id="violin-chart"></div>
+    <script>
+        async function loadData() {
+            try {
+                const response = await fetch('/api/neuron_activations?successful=true&failed=true');
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+                const traces = [];
+                const quadrants = ['S+A+', 'S-A-', 'S+A-', 'S-A+'];
+                const colors = { successful: 'rgba(157, 208, 199, 0.7)', failed: 'rgba(217, 189, 216, 0.7)' };
+                quadrants.forEach(q => {
+                    const qData = data[q] || { successful: [], failed: [] };
+                    const successful = (qData.successful || []).slice(0, 200);
+                    const failed = (qData.failed || []).slice(0, 200);
+                    if (successful.length > 0) {
+                        traces.push({
+                            type: 'violin',
+                            x: Array(successful.length).fill(q + ' (Success)'),
+                            y: successful,
+                            name: q + ' - Success',
+                            box: { visible: true },
+                            meanline: { visible: true },
+                            fillcolor: colors.successful,
+                            line: { color: '#74B69F' },
+                            side: 'negative',
+                            width: 0.5
+                        });
+                    }
+                    if (failed.length > 0) {
+                        traces.push({
+                            type: 'violin',
+                            x: Array(failed.length).fill(q + ' (Failed)'),
+                            y: failed,
+                            name: q + ' - Failed',
+                            box: { visible: true },
+                            meanline: { visible: true },
+                            fillcolor: colors.failed,
+                            line: { color: '#D9BDD8' },
+                            side: 'positive',
+                            width: 0.5
+                        });
+                    }
+                });
+                if (traces.length === 0) {
+                    console.log('No activation data');
+                    return;
+                }
+                Plotly.newPlot('violin-chart', traces, {
+                    title: 'Neuron Activation Distribution',
+                    yaxis: { title: 'Activation Value' },
+                    showlegend: true,
+                    paper_bgcolor: 'white',
+                    plot_bgcolor: 'white',
+                    margin: { l: 60, r: 30, t: 50, b: 80 }
+                }, {responsive: true});
+            } catch (e) {
+                console.error('Panel H load failed:', e);
+            }
+        }
+        window.onload = function() { loadData(); };
+    </script>
+</body>
+</html>

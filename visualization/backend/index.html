@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuroLens Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            background-color: #fafafa;
+            color: #1a1a1a;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .app-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background-color: #fff;
+            border-bottom: 1px solid #e8e8e8;
+            box-shadow: 0 2px 15px -3px rgba(0, 0, 0, 0.07), 0 10px 20px -2px rgba(0, 0, 0, 0.04);
+        }
+
+        .app-header-inner {
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .app-header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px;
+            border: none;
+            background: transparent;
+            border-radius: 8px;
+            cursor: pointer;
+            color: #9ca3af;
+            transition: background-color 0.2s ease;
+        }
+
+        .header-icon-btn:hover {
+            background-color: #f3f4f6;
+        }
+
+        .header-icon-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .header-logo-box {
+            width: 40px;
+            height: 40px;
+            background-color: #e8eef6;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #4a6fa5;
+            flex-shrink: 0;
+        }
+
+        .header-logo-box svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a1a1a;
+            letter-spacing: -0.025em;
+            line-height: 1.3;
+        }
+
+        .header-subtitle {
+            font-size: 12px;
+            color: #9ca3af;
+            line-height: 1.3;
+        }
+
+        .app-header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .header-badge {
+            margin-left: 8px;
+            padding: 4px 8px;
+            background-color: #e8eef6;
+            color: #4a6fa5;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .dashboard-main {
+            padding: 20px;
+        }
+
+        .dashboard-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr 1fr 1fr;
+            grid-template-rows: auto auto auto auto auto auto;
+            gap: 16px;
+        }
+
+        /* Settings Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 9999;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 300px;
+            max-width: 400px;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #333;
+        }
+
+        .modal-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .modal-label {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .modal-select {
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .modal-btn {
+            margin-top: 16px;
+            padding: 8px 16px;
+            background: #444;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            float: right;
+        }
+
+        .modal-btn:hover {
+            background: #333;
+        }
+
+        .version-info {
+            font-size: 12px;
+            color: #999;
+            margin-top: 16px;
+        }
+
+        .panel {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .panel iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            flex: 1;
+        }
+
+        /* Control Panel (A) */
+        .control-panel {
+            grid-row: 1 / 3;
+            grid-column: 1 / 3;
+            min-height: 250px;
+        }
+
+        /* Metric View (B) */
+        .metric-view {
+            grid-row: 3 / 4;
+            grid-column: 1 / 3;
+            min-height: 250px;
+        }
+
+        /* Representation View (C) */
+        .representation-view {
+            grid-row: 4 / 5;
+            grid-column: 1 / 3;
+            min-height: 300px;
+        }
+
+        /* Layer View (D) */
+        .layer-view {
+            grid-row: 1 / 3;
+            grid-column: 3 / 6;
+            min-height: 500px;
+        }
+
+        /* Neuron View (E) */
+        .neuron-view {
+            grid-row: 1 / 3;
+            grid-column: 6 / 9;
+            min-height: 500px;
+        }
+
+        /* Instance View (F) */
+        .instance-view {
+            grid-row: 4 / 5;
+            grid-column: 3 / 9;
+            min-height: 300px;
+        }
+
+        /* Heatmap View (G) */
+        .heatmap-view {
+            grid-row: 3 / 4;
+            grid-column: 3 / 5;
+            min-height: 400px;
+        }
+
+        /* Sankey View (H) */
+        .sankey-view {
+            grid-row: 3 / 4;
+            grid-column: 5 / 7;
+            min-height: 400px;
+        }
+
+        /* Violin View (I) */
+        .violin-view {
+            grid-row: 3 / 4;
+            grid-column: 7 / 9;
+            min-height: 400px;
+        }
+
+        /* Zoom Button */
+        .zoom-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 28px;
+            height: 28px;
+            border: none;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            z-index: 100;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            transition: all 0.2s ease;
+        }
+
+        .zoom-btn:hover {
+            background: #fff;
+            transform: scale(1.1);
+        }
+
+        /* Zoomed State */
+        .panel.zoomed {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85vw;
+            height: 80vh;
+            z-index: 1000;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+        }
+
+        .panel.zoomed .zoom-btn {
+            background: rgba(255,255,255,0.95);
+        }
+
+        .dashboard-container.dimmed > .panel:not(.zoomed) {
+            opacity: 0.15;
+            pointer-events: none;
+        }
+
+        /* Overlay background */
+        .zoom-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+        }
+
+        .zoom-overlay.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <header class="app-header">
+        <div class="app-header-inner">
+            <div class="app-header-left">
+                <button class="header-icon-btn" title="Back to Home" data-i18n-title="backToHome" onclick="window.location.href='/'">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+                </button>
+                <div class="header-logo-box">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                </div>
+                <div>
+                    <h1 class="header-title">NeuroLens</h1>
+                    <p class="header-subtitle" data-i18n="dashboardSubtitle">Visualization Dashboard</p>
+                </div>
+            </div>
+            <div class="app-header-right">
+                <button class="header-icon-btn" title="Refresh Data" id="refreshBtn" onclick="location.reload()">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+                </button>
+                <button class="header-icon-btn" title="Settings" id="settingsBtn" onclick="document.getElementById('settingsModal').classList.toggle('active')">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button class="header-icon-btn" title="Help" id="helpBtn" onclick="document.getElementById('helpModal').classList.toggle('active')">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                </button>
+                <span class="header-badge">NeuroLens</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="dashboard-main">
+    <div class="dashboard-container" id="dashboard">
+        <div class="zoom-overlay" id="zoomOverlay"></div>
+
+        <!-- Control Panel (A) -->
+        <div class="panel control-panel">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_A_control.html" title="Control Panel A" data-i18n-title="controlPanel"></iframe>
+        </div>
+
+        <!-- Metric View (B) -->
+        <div class="panel metric-view">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_B_metric.html" title="Metric View B" data-i18n-title="metricView"></iframe>
+        </div>
+
+        <!-- Representation View (C) -->
+        <div class="panel representation-view">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_C_representation.html" title="Representation View C" data-i18n-title="representationView"></iframe>
+        </div>
+
+        <!-- Layer View (D) -->
+        <div class="panel layer-view">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_D_layer.html" title="Layer View D" data-i18n-title="layerView"></iframe>
+        </div>
+
+        <!-- Neuron View (E) -->
+        <div class="panel neuron-view">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_E_neuron.html" title="Neuron View E" data-i18n-title="neuronView"></iframe>
+        </div>
+
+        <!-- Instance View (K) -->
+        <div class="panel instance-view">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_K_instance.html" title="Instance View F" data-i18n-title="instanceView"></iframe>
+        </div>
+
+        <!-- Heatmap View (F) -->
+        <div class="panel heatmap-view">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_F_heatmap.html" title="Heatmap View F" data-i18n-title="heatmapView"></iframe>
+        </div>
+
+        <!-- Sankey View (G) -->
+        <div class="panel sankey-view">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_G_sankey.html" title="Sankey View G" data-i18n-title="sankeyView"></iframe>
+        </div>
+
+        <!-- Violin View (H) -->
+        <div class="panel violin-view">
+            <button class="zoom-btn" title="Zoom">⤢</button>
+            <iframe src="vis/panel_H_violin.html" title="Violin View H" data-i18n-title="violinView"></iframe>
+        </div>
+
+    </div>
+    </main>
+
+    <script>
+        const dashboard = document.getElementById('dashboard');
+        const overlay = document.getElementById('zoomOverlay');
+
+        function closeZoom() {
+            document.querySelectorAll('.panel.zoomed').forEach(p => {
+                p.classList.remove('zoomed');
+            });
+            overlay.classList.remove('active');
+        }
+
+        // Zoom functionality
+        document.querySelectorAll('.panel').forEach(panel => {
+            const btn = panel.querySelector('.zoom-btn');
+            if (!btn) return;
+
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const wasZoomed = panel.classList.contains('zoomed');
+
+                // Close any existing zoom first
+                closeZoom();
+
+                // If wasn't zoomed, zoom this panel
+                if (!wasZoomed) {
+                    panel.classList.add('zoomed');
+                    overlay.classList.add('active');
+                }
+            });
+        });
+
+        <!-- Click overlay to close zoom -->
+        overlay.addEventListener('click', () => {
+            closeZoom();
+        });
+
+        function applyFontSize(size) {
+            document.body.style.fontSize = size + 'px';
+            localStorage.setItem('fontSize', size);
+        }
+
+        // Language translations
+        const translations = {
+            en: {
+                settings: 'Settings',
+                fontSize: 'Font Size',
+                language: 'Language',
+                theme: 'Theme',
+                close: 'Close',
+                light: 'Light',
+                dark: 'Dark (Coming Soon)',
+                fontSmall: 'Small',
+                fontMedium: 'Medium',
+                fontLarge: 'Large',
+                help: 'Help',
+                backToHome: 'Back to Home',
+                refreshData: 'Refresh Data',
+                dashboardSubtitle: 'Visualization Dashboard',
+                helpContent: '<b>NeuroLens</b> is a neural network safety analysis visualization tool.<br><br>Click the ⤢ button in the top-right corner of a panel to zoom in.<br><br>Use the top buttons to refresh, configure settings, and get help.',
+                // Panel titles
+                controlPanel: 'Control Panel A',
+                metricView: 'Metric View B',
+                representationView: 'Representation View C',
+                layerView: 'Layer View D',
+                neuronView: 'Neuron View E',
+                instanceView: 'Instance View K',
+                heatmapView: 'Heatmap View F',
+                sankeyView: 'Sankey View G',
+                violinView: 'Violin View H'
+            },
+            zh: {
+                settings: '设置',
+                fontSize: '字体大小',
+                language: '语言',
+                theme: '主题',
+                close: '关闭',
+                light: '浅色',
+                dark: '深色 (开发中)',
+                fontSmall: '小号',
+                fontMedium: '中号',
+                fontLarge: '大号',
+                help: '帮助',
+                backToHome: '返回主页',
+                refreshData: '刷新数据',
+                dashboardSubtitle: '模型可视化分析',
+                helpContent: '<b>NeuroLens</b> 是一个神经网络安全分析可视化工具。<br><br>点击面板右上角 ⤢ 按钮可放大查看。<br><br>使用顶部按钮进行刷新、设置和获取帮助。',
+                // Panel titles
+                controlPanel: '控制面板 A',
+                metricView: '度量视图 B',
+                representationView: '表征视图 C',
+                layerView: '层级视图 D',
+                neuronView: '神经元视图 E',
+                instanceView: '实例视图 K',
+                heatmapView: '热力图视图 F',
+                sankeyView: '桑基图视图 G',
+                violinView: '小提琴图视图 H'
+            }
+        };
+
+        var currentLanguage;
+        function applyLanguage(lang) {
+            currentLanguage = lang;
+            localStorage.setItem('language', lang);
+
+            // 语言下拉可能在 DOM 尚未就绪时还不存在，这里做空值保护
+            const languageSelectEl = document.getElementById('languageSelect');
+            if (languageSelectEl) {
+                languageSelectEl.value = lang;
+            }
+
+            updateLanguage(lang);
+            // Dispatch event for iframes to listen
+            window.dispatchEvent(new CustomEvent('languageChange', { detail: lang }));
+            // Send message to all iframes
+            document.querySelectorAll('iframe').forEach(iframe => {
+                try {
+                    iframe.contentWindow.postMessage({ type: 'languageChange', lang: lang }, '*');
+                } catch (e) {
+                    // Cross-origin or other errors, ignore
+                }
+            });
+        }
+
+        function updateLanguage(lang) {
+            const t = translations[lang];
+            if (!t) return;
+
+            // Update elements with data-i18n attribute in index.html
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (t[key]) {
+                    el.textContent = t[key];
+                }
+            });
+
+            // Update iframe titles
+            document.querySelectorAll('iframe[data-i18n-title]').forEach(el => {
+                const key = el.getAttribute('data-i18n-title');
+                if (t[key]) {
+                    el.setAttribute('title', t[key]);
+                }
+            });
+
+            // Update title attributes
+            const settingsBtnEl = document.getElementById('settingsBtn');
+            const helpBtnEl = document.getElementById('helpBtn');
+            const refreshBtnEl = document.getElementById('refreshBtn');
+
+            if (settingsBtnEl) settingsBtnEl.title = t.settings;
+            if (helpBtnEl) helpBtnEl.title = t.help;
+            if (refreshBtnEl) refreshBtnEl.title = t.refreshData;
+
+            document.querySelectorAll('[data-i18n-title]').forEach(el => {
+                const key = el.getAttribute('data-i18n-title');
+                if (t[key]) {
+                    el.setAttribute('title', t[key]);
+                }
+            });
+
+            // Update Help modal content
+            const helpLabel = document.querySelector('#helpModal .modal-label');
+            if (helpLabel) helpLabel.innerHTML = t.helpContent;
+        }
+
+        // Initialize UI when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            const settingsModal = document.getElementById('settingsModal');
+            const helpModal = document.getElementById('helpModal');
+            
+            // Modal click outside to close
+            settingsModal.addEventListener('click', function(e) {
+                if (e.target === settingsModal) {
+                    settingsModal.classList.remove('active');
+                }
+            });
+            
+            helpModal.addEventListener('click', function(e) {
+                if (e.target === helpModal) {
+                    helpModal.classList.remove('active');
+                }
+            });
+
+            // Load saved font size
+            const savedFontSize = localStorage.getItem('fontSize');
+            if (savedFontSize) {
+                document.body.style.fontSize = savedFontSize + 'px';
+                const fontSizeSelectEl = document.getElementById('fontSizeSelect');
+                if (fontSizeSelectEl) {
+                    fontSizeSelectEl.value = savedFontSize;
+                }
+            }
+
+            // Load saved language - default to English
+            let savedLanguage = localStorage.getItem('language');
+            // Force default to English on first load
+            if (!savedLanguage || savedLanguage === 'zh') {
+                savedLanguage = 'en';
+                localStorage.setItem('language', 'en');
+            }
+            currentLanguage = savedLanguage;
+
+            // 语言下拉控件在此时已经渲染完成，安全设置
+            const languageSelectEl = document.getElementById('languageSelect');
+            if (languageSelectEl) {
+                languageSelectEl.value = savedLanguage;
+            }
+            // Always update language to ensure UI is in sync
+            updateLanguage(savedLanguage);
+        });
+
+        // ─── Listen for messages from Panel A (pipeline done, model switched, etc.) ───
+        window.addEventListener('message', function(e) {
+            const data = e.data;
+            if (!data || !data.source) return;
+
+            if (data.type === 'pipelineDone' || data.type === 'refreshPanels' || data.type === 'modelSwitched') {
+                // Reload all panel iframes (except Panel A)
+                document.querySelectorAll('iframe').forEach(function(iframe) {
+                    if (iframe.title && !iframe.title.includes('Control Panel A')) {
+                        try {
+                            iframe.contentWindow.location.reload();
+                        } catch(ex) {
+                            // Fallback: re-assign src
+                            iframe.src = iframe.src;
+                        }
+                    }
+                });
+            }
+        });
+    </script>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <div class="modal-title" data-i18n="settings">Settings</div>
+            <div class="modal-row">
+                <span class="modal-label" data-i18n="fontSize">Font Size</span>
+                <select class="modal-select" id="fontSizeSelect" onchange="applyFontSize(this.value)">
+                    <option value="12" data-i18n="fontSmall">Small</option>
+                    <option value="14" selected data-i18n="fontMedium">Medium</option>
+                    <option value="16" data-i18n="fontLarge">Large</option>
+                </select>
+            </div>
+            <div class="modal-row">
+                <span class="modal-label" data-i18n="language">Language</span>
+                <select class="modal-select" id="languageSelect" onchange="applyLanguage(this.value)">
+                    <option value="en">English</option>
+                    <option value="zh">中文</option>
+                </select>
+            </div>
+            <div class="modal-row">
+                <span class="modal-label" data-i18n="theme">Theme</span>
+                <select class="modal-select">
+                    <option data-i18n="light">Light</option>
+                    <option data-i18n="dark">Dark (Coming Soon)</option>
+                </select>
+            </div>
+            <div class="version-info" id="neurolens-app-version">NeuroLens</div>
+            <button class="modal-btn" onclick="document.getElementById('settingsModal').classList.remove('active')" data-i18n="close">Close</button>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div class="modal-overlay" id="helpModal">
+        <div class="modal">
+            <div class="modal-title">Help</div>
+            <div class="modal-label" style="line-height: 1.8;">
+                <b>NeuroLens</b> is a neural network safety analysis visualization tool.<br><br>
+                Click the ⤢ button in the top-right corner of a panel to zoom in.<br><br>
+                Use the top buttons to refresh, configure settings, and get help.
+            </div>
+            <button class="modal-btn" onclick="document.getElementById('helpModal').classList.remove('active')">Close</button>
+        </div>
+    </div>
+    <script>
+    (function () {
+      var el = document.getElementById('neurolens-app-version');
+      if (!el) return;
+      fetch('/health').then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.version) el.textContent = 'NeuroLens v' + d.version;
+      }).catch(function () { /* 离线或非同源时保留占位 */ });
+    })();
+    </script>
+</body>
+</html>

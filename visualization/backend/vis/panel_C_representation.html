@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Representation View C</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 100vh;
+            overflow: auto;
+        }
+
+        .panel-header {
+            margin-bottom: 16px;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            white-space: nowrap;
+            margin-bottom: 12px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        select {
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .chart-container {
+            flex: 1;
+            min-height: 400px;
+            position: relative;
+        }
+
+        .legend {
+            display: flex;
+            gap: 16px;
+            margin-top: 16px;
+            font-size: 12px;
+            justify-content: center;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.benign {
+            background-color: #86B7DB;
+        }
+        
+        .legend-dot.harmful {
+            background-color: #EBB3BE;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+    <script src="/vis/echarts.min.js"></script>
+</head>
+<body>
+    <div class="panel-header">
+        <div class="panel-title">Representation View C</div>
+        <div class="controls">
+            <select id="modeSelect">
+                <option value="standard">Standard</option>
+                <option value="decision_boundary">Decision Boundary</option>
+            </select>
+            <select id="layerSelect">
+                <option value="32">Layer 32</option>
+                <option value="31">Layer 31</option>
+                <option value="30">Layer 30</option>
+                <option value="29">Layer 29</option>
+                <option value="28">Layer 28</option>
+                <option value="27">Layer 27</option>
+                <option value="26">Layer 26</option>
+                <option value="25">Layer 25</option>
+                <option value="24">Layer 24</option>
+                <option value="23">Layer 23</option>
+                <option value="22">Layer 22</option>
+                <option value="21">Layer 21</option>
+                <option value="20">Layer 20</option>
+                <option value="19">Layer 19</option>
+                <option value="18">Layer 18</option>
+                <option value="17">Layer 17</option>
+                <option value="16">Layer 16</option>
+                <option value="15">Layer 15</option>
+                <option value="14">Layer 14</option>
+                <option value="13">Layer 13</option>
+                <option value="12">Layer 12</option>
+                <option value="11">Layer 11</option>
+                <option value="10">Layer 10</option>
+                <option value="9">Layer 9</option>
+                <option value="8">Layer 8</option>
+                <option value="7">Layer 7</option>
+                <option value="6">Layer 6</option>
+                <option value="5">Layer 5</option>
+                <option value="4">Layer 4</option>
+                <option value="3">Layer 3</option>
+                <option value="2">Layer 2</option>
+                <option value="1">Layer 1</option>
+                <option value="0">Layer 0</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="chart-container" id="representationChart">
+        <div class="loading">Loading data...</div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-dot benign"></div>
+            <span>Benign (Failed)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot harmful"></div>
+            <span>Harmful (Jailbroken)</span>
+        </div>
+    </div>
+
+    <script>
+        const chartDom = document.getElementById('representationChart');
+        const myChart = echarts.init(chartDom);
+        
+        let currentData = null;
+        let currentLayer = 32;
+        let currentMode = 'standard';
+
+        // 加载数据
+        async function loadData(layer, mode) {
+            // 数据文件通过后端动态路由加载（跟随活跃模型/版本）
+            const filename = `/outputs/representation/representation_layer_${layer}_${mode}.json`;
+            try {
+                const response = await fetch(filename);
+                if (!response.ok) {
+                    throw new Error(`Failed to load ${filename}`);
+                }
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error('Error loading data:', error);
+                return null;
+            }
+        }
+
+        // Update chart with current language
+        function updateChart(data) {
+            if (!data || !data.points) {
+                console.error('Invalid data');
+                return;
+            }
+
+            currentData = data;
+            const t = translationsC[currentLangC];
+
+            // 分离成功和失败的样本
+            const benignPoints = [];
+            const harmfulPoints = [];
+            const benignData = [];
+            const harmfulData = [];
+
+            data.points.forEach(point => {
+                const pointData = [point.x, point.y];
+                if (point.jailbroken) {
+                    harmfulPoints.push(point);
+                    harmfulData.push(pointData);
+                } else {
+                    benignPoints.push(point);
+                    benignData.push(pointData);
+                }
+            });
+
+            // 构建系列
+            const series = [];
+
+            // 决策边界线（仅决策边界对齐模式）
+            if (data.mode === 'decision_boundary' && data.decision_boundary && data.decision_boundary.points) {
+                const boundaryPoints = data.decision_boundary.points;
+                series.push({
+                    name: t.decisionBoundaryName,
+                    type: 'line',
+                    data: boundaryPoints,
+                    lineStyle: {
+                        color: '#ef4444',
+                        width: 2,
+                        type: 'dashed'
+                    },
+                    symbol: 'none',
+                    emphasis: {
+                        disabled: true
+                    },
+                    tooltip: {
+                        show: false
+                    }
+                });
+            }
+
+            // 散点图（放在最上层）
+            series.push({
+                name: t.benignName,
+                type: 'scatter',
+                data: benignData,
+                symbolSize: 4,
+                itemStyle: {
+                    color: '#86B7DB',
+                    opacity: 0.6
+                },
+                emphasis: {
+                    itemStyle: {
+                        opacity: 1,
+                        borderColor: '#86B7DB',
+                        borderWidth: 2
+                    }
+                },
+                z: 10
+            });
+            
+            series.push({
+                name: t.harmfulName,
+                type: 'scatter',
+                data: harmfulData,
+                symbolSize: 4,
+                itemStyle: {
+                    color: '#EBB3BE',
+                    opacity: 0.6
+                },
+                emphasis: {
+                    itemStyle: {
+                        opacity: 1,
+                        borderColor: '#EBB3BE',
+                        borderWidth: 2
+                    }
+                },
+                z: 10
+            });
+
+            // 构建选项
+            const option = {
+                xAxis: {
+                    type: 'value',
+                    name: data.mode === 'decision_boundary' ? t.wToxicDirection : t.dimension1,
+                    nameLocation: 'middle',
+                    nameGap: 25,
+                    axisLine: {
+                        lineStyle: {
+                            color: '#9ca3af'
+                        }
+                    },
+                    axisLabel: {
+                        color: '#9ca3af',
+                        fontSize: 10
+                    },
+                    splitLine: {
+                        lineStyle: {
+                            color: '#e5e7eb',
+                            type: 'dashed'
+                        }
+                    }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: data.mode === 'decision_boundary' ? t.orthogonalDimension : t.dimension2,
+                    nameLocation: 'middle',
+                    nameGap: 30,
+                    axisLine: {
+                        lineStyle: {
+                            color: '#9ca3af'
+                        }
+                    },
+                    axisLabel: {
+                        color: '#9ca3af',
+                        fontSize: 10
+                    },
+                    splitLine: {
+                        lineStyle: {
+                            color: '#e5e7eb',
+                            type: 'dashed'
+                        }
+                    }
+                },
+                series: series,
+                tooltip: {
+                    trigger: 'item',
+                    formatter: function(params) {
+                        if (params.seriesName === t.decisionBoundaryName) {
+                            return '';
+                        }
+                        
+                        // 找到对应的点数据
+                        if (params.seriesName === t.benignName || params.seriesName === t.harmfulName) {
+                            const pointIndex = params.dataIndex;
+                            const point = params.seriesName === t.benignName 
+                                ? benignPoints[pointIndex]
+                                : harmfulPoints[pointIndex];
+                            
+                            if (!point) return '';
+                            
+                            return `
+                                <div style="max-width: 300px;">
+                                    <strong>${point.jailbroken ? t.jailbroken : t.failed}</strong><br/>
+                                    ${t.method}: ${point.method}<br/>
+                                    ${t.id}: ${point.id}
+                                </div>
+                            `;
+                        }
+                        
+                        return '';
+                    }
+                },
+                grid: {
+                    left: 60,
+                    right: 20,
+                    top: 20,
+                    bottom: 60
+                },
+                animation: false
+            };
+
+            myChart.clear();
+            myChart.setOption(option, true);
+        }
+
+        // Initialize
+        async function init() {
+            const layer = parseInt(document.getElementById('layerSelect').value);
+            const mode = document.getElementById('modeSelect').value;
+            
+            currentLayer = layer;
+            currentMode = mode;
+            
+            const data = await loadData(layer, mode);
+            if (data) {
+                updateChart(data);
+            } else {
+                const t = translationsC[currentLangC];
+                chartDom.innerHTML = `<div class="loading">${t.failedToLoad}</div>`;
+            }
+        }
+
+        // 切换层
+        document.getElementById('layerSelect').addEventListener('change', async function() {
+            const layer = parseInt(this.value);
+            currentLayer = layer;
+            
+            const data = await loadData(layer, currentMode);
+            if (data) {
+                updateChart(data);
+            }
+        });
+
+        // 切换模式
+        document.getElementById('modeSelect').addEventListener('change', async function() {
+            const mode = this.value;
+            currentMode = mode;
+            
+            const data = await loadData(currentLayer, mode);
+            if (data) {
+                updateChart(data);
+            }
+        });
+
+        // 响应式调整
+        window.addEventListener('resize', function() {
+            myChart.resize();
+        });
+
+        // Language translations
+        let currentLangC = 'en';
+        const translationsC = {
+            en: {
+                representationView: 'Representation View C',
+                standard: 'Standard',
+                decisionBoundary: 'Decision Boundary',
+                layer: 'Layer',
+                loadingData: 'Loading data...',
+                noData: 'No data available',
+                failedToLoad: 'Failed to load data. Please generate data first using generate_representation_data.py',
+                benign: 'Benign (Failed)',
+                harmful: 'Harmful (Jailbroken)',
+                jailbroken: 'Jailbroken',
+                failed: 'Failed',
+                method: 'Method',
+                id: 'ID',
+                wToxicDirection: 'w_toxic Direction',
+                orthogonalDimension: 'Orthogonal Dimension',
+                dimension1: 'Dimension 1',
+                dimension2: 'Dimension 2',
+                decisionBoundaryName: 'Decision Boundary',
+                benignName: 'Benign',
+                harmfulName: 'Harmful'
+            },
+            zh: {
+                representationView: '表征视图 C',
+                standard: '标准',
+                decisionBoundary: '决策边界',
+                layer: '层',
+                loadingData: '正在加载数据...',
+                noData: '暂无数据',
+                failedToLoad: '数据加载失败，请先运行 generate_representation_data.py 生成数据',
+                benign: '良性（未越狱）',
+                harmful: '有害（已越狱）',
+                jailbroken: '已越狱',
+                failed: '未越狱',
+                method: '攻击方法',
+                id: '编号',
+                wToxicDirection: '有害方向',
+                orthogonalDimension: '正交维度',
+                dimension1: '维度 1',
+                dimension2: '维度 2',
+                decisionBoundaryName: '决策边界',
+                benignName: '良性',
+                harmfulName: '有害'
+            }
+        };
+
+        function updatePanelCLanguage(lang) {
+            const t = translationsC[lang];
+            if (!t) return;
+            currentLangC = lang;
+
+            // Update panel header
+            document.querySelector('.panel-title').textContent = t.representationView;
+
+            // Update select options
+            const modeSelect = document.getElementById('modeSelect');
+            if (modeSelect) {
+                const options = modeSelect.querySelectorAll('option');
+                if (options[0]) options[0].textContent = t.standard;
+                if (options[1]) options[1].textContent = t.decisionBoundary;
+            }
+
+            // Update layer options
+            const layerSelect = document.getElementById('layerSelect');
+            if (layerSelect) {
+                const options = layerSelect.querySelectorAll('option');
+                options.forEach(opt => {
+                    const layerNum = opt.value;
+                    opt.textContent = t.layer + ' ' + layerNum;
+                });
+            }
+
+            // Update legend
+            const legendItems = document.querySelectorAll('.legend-item span');
+            if (legendItems[0]) legendItems[0].textContent = t.benign;
+            if (legendItems[1]) legendItems[1].textContent = t.harmful;
+
+            // Update loading text
+            const loadingEl = document.querySelector('.loading');
+            if (loadingEl && loadingEl.textContent.toLowerCase().includes('loading')) {
+                loadingEl.textContent = t.loadingData;
+            }
+
+            // Re-render chart with new language
+            if (currentData) {
+                updateChart(currentData);
+            }
+        }
+
+        // Listen for language change
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'languageChange') {
+                updatePanelCLanguage(event.data.lang);
+            }
+        });
+
+        const savedLangC = localStorage.getItem('language') || 'en';
+        // Ensure default is English
+        if (!localStorage.getItem('language')) {
+            localStorage.setItem('language', 'en');
+        }
+        currentLangC = savedLangC;
+        setTimeout(() => updatePanelCLanguage(savedLangC), 500);
+
+        // 初始化加载
+        init();
+    </script>
+</body>
+</html>

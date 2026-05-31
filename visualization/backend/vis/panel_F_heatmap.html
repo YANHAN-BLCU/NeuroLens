@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>热力图 - 跨层语义相似度</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 100vh;
+            overflow: auto;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .controls {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .control-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .control-label {
+            font-size: 12px;
+            color: #555;
+        }
+
+        select {
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+            background: white;
+        }
+
+        input[type="range"] {
+            width: 120px;
+        }
+
+        .threshold-value {
+            font-size: 12px;
+            color: #333;
+            min-width: 30px;
+        }
+
+        .threshold-hint {
+            font-size: 11px;
+            color: #888;
+            margin-left: 4px;
+        }
+
+        button {
+            padding: 6px 12px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        button.secondary {
+            background: #64748b;
+        }
+
+        button.secondary:hover {
+            background: #475569;
+        }
+
+        #heatmap-chart {
+            width: 100%;
+            height: calc(100vh - 160px);
+            min-height: 280px;
+        }
+    </style>
+</head>
+<body>
+    <div class="panel-header">
+        <div class="panel-title" data-i18n="heatmap_title">语义相似度视图 F</div>
+    </div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <span class="control-label" data-i18n="layer_interval">层间隔:</span>
+            <select id="layerInterval" onchange="updateDisplay()">
+                <option value="1" data-i18n="every_layer">每层 (33层)</option>
+                <option value="2" data-i18n="every_2_layer">每2层 (17层)</option>
+                <option value="3" data-i18n="every_3_layer">每3层 (11层)</option>
+                <option value="4" selected data-i18n="every_4_layer">每4层 (8层)</option>
+                <option value="5" data-i18n="every_5_layer">每5层 (7层)</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <span class="control-label" data-i18n="similarity_threshold">相似度阈值</span>:
+            <span id="thresholdValue" class="threshold-value">0</span>%
+            <input type="range" id="similarityThreshold" min="0" max="100" value="0" 
+                   oninput="document.getElementById('thresholdValue').textContent = this.value; updateDisplay()">
+            <span class="threshold-hint" data-i18n="threshold_hint">(低于此值显示为0)</span>
+        </div>
+    </div>
+    
+    <div id="heatmap-chart"></div>
+
+    <script>
+        // Translations
+        const translations = {
+            en: {
+                heatmap_title: "Semantic Similarity View F",
+                display_control: "Display Control",
+                layer_interval: "Layer Interval",
+                every_layer: "Every Layer (33)",
+                every_2_layer: "Every 2 Layers (17)",
+                every_3_layer: "Every 3 Layers (11)",
+                every_4_layer: "Every 4 Layers (8)",
+                every_5_layer: "Every 5 Layers (7)",
+                similarity_threshold: "Similarity Threshold",
+                threshold_hint: "(Below shows as 0)",
+                layer: "Layer",
+                similarity: "Similarity"
+            },
+            zh: {
+                heatmap_title: "语义相似度视图 F",
+                display_control: "显示控制",
+                layer_interval: "层间隔",
+                every_layer: "每层 (33)",
+                every_2_layer: "每2层 (17)",
+                every_3_layer: "每3层 (11)",
+                every_4_layer: "每4层 (8)",
+                every_5_layer: "每5层 (7)",
+                similarity_threshold: "相似度阈值",
+                threshold_hint: "(低于此值显示为0)",
+                layer: "层",
+                similarity: "相似度"
+            }
+        };
+
+        // Get saved language
+        let currentLang = localStorage.getItem('language') || 'zh';
+
+        // Update language
+        function updateLanguage(lang) {
+            currentLang = lang;
+            const t = translations[lang] || translations.zh;
+            
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (t[key]) {
+                    el.textContent = t[key];
+                }
+            });
+            
+            document.querySelectorAll('select#layerInterval option').forEach((opt, idx) => {
+                const keys = ['every_layer', 'every_2_layer', 'every_3_layer', 'every_4_layer', 'every_5_layer'];
+                if (keys[idx]) opt.textContent = t[keys[idx]];
+            });
+            
+            if (originalMatrix.length > 0) {
+                updateDisplay();
+            }
+        }
+
+        // Listen for language changes from parent
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'languageChange') {
+                updateLanguage(event.data.lang);
+            }
+        });
+
+        const API_BASE_URL = '';
+        let originalMatrix = [];
+        let originalLabels = [];
+        
+        function t(key) {
+            return translations[currentLang][key] || translations.zh[key] || key;
+        }
+        
+        async function loadData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/layer_similarity`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                originalMatrix = data.matrix || [];
+                originalLabels = data.layer_labels || [];
+                
+                if (originalMatrix.length === 0) {
+                    throw new Error('Matrix is empty');
+                }
+                
+                updateDisplay();
+                
+            } catch (error) {
+                console.error('Load failed:', error);
+            }
+        }
+
+        function updateDisplay() {
+            if (originalMatrix.length === 0) return;
+            
+            let matrix = originalMatrix;
+            let labels = originalLabels;
+            
+            const interval = parseInt(document.getElementById('layerInterval').value) || 4;
+            const filteredIndices = [];
+            for (let i = 0; i < matrix.length; i += interval) {
+                filteredIndices.push(i);
+            }
+            
+            const filteredMatrix = filteredIndices.map(i => 
+                filteredIndices.map(j => matrix[i][j])
+            );
+            const filteredLabels = filteredIndices.map(i => {
+                const label = labels[i] || `Layer ${i}`;
+                const match = label.match(/\d+/);
+                return match ? `L${match[0]}` : label;
+            });
+            
+            const threshold = parseFloat(document.getElementById('similarityThreshold').value) || 0;
+            const thresholdedMatrix = filteredMatrix.map(row => 
+                row.map(val => val >= threshold ? val : 0)
+            );
+            
+            drawHeatmap(thresholdedMatrix, filteredLabels, threshold);
+        }
+
+        function drawHeatmap(matrix, labels, threshold) {
+            const customColorscale = [
+                [0, '#9DD0C7'],
+                [0.25, '#8AB1D2'],
+                [0.5, '#D9BDD8'],
+                [0.75, '#9180AC'],
+                [1, '#E58579']
+            ];
+            
+            const isZh = currentLang === 'zh';
+            const similarityText = isZh ? '相似度' : 'Similarity';
+            const layerText = isZh ? '层' : 'Layer';
+            
+            const data = [{
+                z: matrix,
+                x: labels,
+                y: labels,
+                type: 'heatmap',
+                colorscale: customColorscale,
+                showscale: true,
+                colorbar: {
+                    title: similarityText,
+                    titleside: 'right',
+                    len: 0.7
+                },
+                hovertemplate: `<b>%{y} ↔ %{x}</b><br>${similarityText}: %{z:.2f}%<extra></extra>`,
+                text: matrix.map(row => 
+                    row.map(val => val > 0 ? val.toFixed(1) + '%' : '')
+                ),
+                texttemplate: '%{text}',
+                textfont: {
+                    size: 9,
+                    color: 'white'
+                },
+                zmin: 0,
+                zmax: 100
+            }];
+            
+            const layout = {
+                title: {
+                    text: `${isZh ? '层间语义相似度热力图' : 'Cross-Layer Similarity'}${threshold > 0 ? ` (${isZh ? '阈值' : 'Thresh'}: ${threshold}%)` : ''}`,
+                    font: { size: 14 }
+                },
+                xaxis: {
+                    title: layerText,
+                    side: 'bottom',
+                    tickangle: -45,
+                    tickfont: { size: 10 },
+                    titlefont: { size: 11 }
+                },
+                yaxis: {
+                    title: layerText,
+                    autorange: 'reversed',
+                    tickfont: { size: 10 },
+                    titlefont: { size: 11 }
+                },
+                margin: { l: 80, r: 40, t: 50, b: 80 },
+                paper_bgcolor: 'white',
+                plot_bgcolor: 'white'
+            };
+            
+            Plotly.newPlot('heatmap-chart', data, layout, {responsive: true});
+        }
+
+        window.onload = function() {
+            updateLanguage(currentLang);
+            loadData();
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,944 @@
+================================================================================
+                    NeuroLens 项目
+              开源代码与组件使用情况说明书
+================================================================================
+
+项目名称: NeuroLens
+项目描述: 大语言模型安全神经元分析与可视化研究平台
+版本: 1.0.1
+更新日期: 2026年4月12日
+
+================================================================================
+第一部分 项目概述
+================================================================================
+
+NeuroLens 是实现 NeuroBreak 论文的完整研究管线，集神经元分析、可视化、
+评估于一体的高级深度学习框架。项目采用模块化架构，由核心库(engine)、
+研究脚本(scripts)和可视化系统(visualization)组成。
+
+核心功能:
+- 安全神经元识别与效用神经元检测
+- SNIP 神经元重要性评分
+- 激活投影与参数对齐分析
+- 象限分类与专用安全神经元计算
+- 线性探针训练
+- 目标安全微调(TSFT/VA-TSFT)
+- SALAD-Bench 越狱攻击评估
+- 交互式数据可视化仪表盘(9个分析面板)
+
+
+================================================================================
+第二部分 开源依赖库详细说明
+================================================================================
+
+项目采用的主要开源库分为以下几类:
+
+
+【1】深度学习框架
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1.1 PyTorch
+  版本: 2.6.0+cu124 (CUDA 12.4编译)
+  官网: https://pytorch.org
+  许可证: BSD License
+  用途: 深度学习框架，提供张量计算、自动求导、神经网络模块
+  关键模块:
+    - torch.nn: 神经网络层定义(Linear、Conv等)
+    - torch.optim: 优化器(Adam、SGD等)
+    - torch.utils.data: 数据加载与管线
+  项目使用: 核心计算引擎，支撑所有神经元分析和微调操作
+
+1.2 Transformers
+  版本: 4.46.3
+  官网: https://huggingface.co/transformers
+  许可证: Apache 2.0
+  用途: 预训练语言模型加载与推理
+  关键类:
+    - AutoModelForCausalLM: 自动加载因果语言模型
+    - AutoTokenizer: 自动加载对应分词器
+    - pipeline: 高级推理接口
+  项目使用:
+    - 加载 Llama-3-8B-Instruct (目标模型)
+    - 加载 Llama-Guard-3-8B (安全分类器)
+    - 支持任何基于 CausalLM 的模型
+
+1.3 Accelerate
+  版本: 1.1.1
+  官网: https://huggingface.co/accelerate
+  许可证: Apache 2.0
+  用途: 分布式训练与模型优化加速
+  功能:
+    - 多GPU/多节点训练支持
+    - 自动混合精度(AMP)
+    - 梯度累积
+  项目使用: 微调阶段的加速训练
+
+1.4 BitsAndBytes
+  版本: >=0.41.0
+  官网: https://github.com/TimDettmers/bitsandbytes
+  许可证: MIT
+  用途: 4-bit/8-bit 模型量化，减少显存占用
+  功能:
+    - 4-bit 整数量化
+    - 8-bit 动态量化
+    - QLoRA 微调支持
+  项目使用: 大模型量化推理(可选)
+
+【2】数据处理与分析
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+2.1 NumPy
+  版本: 1.26.4
+  官网: https://numpy.org
+  许可证: BSD
+  用途: 多维数组计算和数值操作
+  关键功能:
+    - ndarray: N维数组对象
+    - linalg: 线性代数(特征值、矩阵分解)
+    - random: 随机数生成
+  项目使用: 神经元向量计算、激活投影、矩阵操作
+
+2.2 Pandas
+  版本: 2.2.3
+  官网: https://pandas.pydata.org
+  许可证: BSD
+  用途: 表格数据处理与分析
+  关键结构:
+    - DataFrame: 二维表格数据结构
+    - Series: 一维时间序列
+  项目使用:
+    - 加载和处理数据集(SALAD、Utility基准)
+    - 结果统计与报告生成
+    - 评估指标计算
+
+2.3 Scikit-Learn
+  版本: 1.5.2
+  官网: https://scikit-learn.org
+  许可证: BSD
+  用途: 机器学习算法库
+  关键模块:
+    - linear_model: 线性探针(LinearRegression、LogisticRegression)
+    - preprocessing: 数据标准化(StandardScaler)
+    - metrics: 评估指标(accuracy_score、f1_score等)
+  项目使用: 线性探针训练、数据标准化、指标评估
+
+2.4 SciPy
+  版本: 1.11.4
+  官网: https://scipy.org
+  许可证: BSD
+  用途: 科学计算库
+  关键模块:
+    - optimize: 优化算法
+    - spatial: 空间距离计算(余弦相似度等)
+    - stats: 统计学函数
+  项目使用: 参数对齐、相似度计算
+
+2.5 Datasets
+  版本: 3.0.2
+  官网: https://huggingface.co/datasets
+  许可证: Apache 2.0
+  用途: 大规模数据集加载与处理
+  功能:
+    - 自动下载多种公开数据集
+    - 高效缓存与流处理
+    - 数据集版本管理
+  项目使用: 加载 SALAD-Bench、ARC、HellaSwag 等评估基准
+
+2.6 SentencePiece
+  版本: 0.2.0
+  官网: https://github.com/google/sentencepiece
+  许可证: Apache 2.0
+  用途: 字节对编码(BPE)分词器
+  功能: 模型无关的分词算法
+  项目使用: 某些模型的分词支持
+
+【3】配置与监控
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3.1 Hydra
+  版本: 1.3.2
+  官网: https://hydra.cc
+  许可证: Apache 2.0
+  用途: 配置管理与实验组织
+  核心功能:
+    - YAML配置文件管理
+    - 命令行参数覆盖
+    - 多运行管理
+  项目使用: 配置 configs/runtime/ 中的 YAML 参数
+
+3.2 Weights & Biases (wandb)
+  版本: 0.18.7
+  官网: https://wandb.ai
+  许可证: MIT (本地模式免费)
+  用途: 实验追踪、指标记录、可视化
+  功能:
+    - 训练指标实时监控
+    - 超参数日志
+    - 结果对比与版本管理
+  项目使用: 微调阶段的训练监控(可选)
+
+3.3 tqdm
+  版本: >=4.64.0
+  官网: https://github.com/tqdm/tqdm
+  许可证: MIT
+  用途: 进度条显示
+  用法: 包装任何可迭代对象显示进度
+  项目使用: 数据加载、评估循环的进度显示
+
+【4】Web 后端
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+4.1 FastAPI
+  版本: 0.115.4 (可视化后端) / 0.109.0 (检查版本)
+  官网: https://fastapi.tiangolo.com
+  许可证: MIT
+  用途: 高性能异步 Web 框架
+  特点:
+    - 自动 API 文档生成(Swagger/ReDoc)
+    - 数据验证(Pydantic)
+    - 异步/并发支持
+  项目使用:
+    - 可视化系统后端 API
+    - 推理服务端点
+    - 任务提交与状态查询
+
+4.2 Uvicorn
+  版本: 0.32.0 / 0.27.0
+  官网: https://www.uvicorn.org
+  许可证: BSD
+  用途: ASGI 应用服务器
+  功能:
+    - 异步请求处理
+    - 多工作进程支持
+  项目使用: 托管 FastAPI 应用，监听 6008 端口
+
+4.3 Flask
+  版本: 3.0.3
+  官网: https://flask.palletsprojects.com
+  许可证: BSD
+  用途: 轻量级 Web 框架(备选方案)
+  项目使用: 部分功能的备选实现
+
+4.4 Pydantic
+  版本: 2.5.3
+  官网: https://docs.pydantic.dev
+  许可证: MIT
+  用途: 数据验证与序列化
+  功能:
+    - 类型检查
+    - 自动 JSON Schema 生成
+  项目使用: FastAPI 请求/响应模型定义
+
+4.5 python-multipart
+  版本: 0.0.6
+  官网: https://github.com/andrew-d/python-multipart
+  许可证: MIT
+  用途: 表单数据解析
+  项目使用: FastAPI 文件上传支持
+
+4.6 aiofiles
+  版本: 23.2.1
+  官网: https://github.com/Tinche/aiofiles
+  许可证: Apache 2.0
+  用途: 异步文件操作
+  项目使用: 异步读写输出文件
+
+【5】数据可视化
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+5.1 Plotly
+  版本: 5.24.1
+  官网: https://plotly.com/python
+  许可证: MIT
+  用途: 交互式绘图库
+  图表类型:
+    - 散点图、折线图
+    - 柱状图、箱线图
+    - 3D 绘图
+  项目使用:
+    - 隐藏态 t-SNE/PCA 散点(面板 C)
+    - 激活分布(面板 H)
+    - 指标对比(面板 B)
+
+5.2 Dash
+  版本: 2.18.2
+  官网: https://dash.plotly.com
+  许可证: MIT
+  用途: Python 交互式仪表盘框架
+  功能:
+    - 组件库(Dash Core Components)
+    - 回调机制(响应式更新)
+  项目使用: 交互式面板的备选实现
+
+5.3 ECharts Python
+  版本: 0.1.3
+  官网: https://github.com/pyecharts/pyecharts
+  许可证: MIT
+  用途: Apache ECharts 的 Python 绑定
+  图表: Sankey 桑基图、力导向图、热力图等
+  项目使用:
+    - 攻击路径桑基图(面板 G)
+    - 神经元连接图(面板 E)
+    - 跨层相似度热力图(面板 F)
+
+【6】前端 JavaScript/TypeScript 库
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6.1 React
+  版本: 18.2.0
+  官网: https://react.dev
+  许可证: MIT
+  用途: UI 组件框架
+  核心概念:
+    - 函数式组件
+    - Hooks (useState、useEffect 等)
+    - JSX 语法
+  项目使用: 可视化系统前端(港port 6006 开发模式)
+
+6.2 React Router DOM
+  版本: 6.21.3
+  官网: https://reactrouter.com
+  许可证: MIT
+  用途: 客户端路由
+  功能:
+    - 页面导航
+    - 路径参数传递
+    - 嵌套路由
+  项目使用: 9 个面板之间的导航
+
+6.3 Zustand
+  版本: 4.5.0
+  官网: https://github.com/pmndrs/zustand
+  许可证: MIT
+  用途: 轻量级状态管理
+  优点: 简洁 API，无样板代码
+  项目使用: 全局状态管理(选中神经元、过滤条件等)
+
+6.4 Axios
+  版本: 1.6.5
+  官网: https://axios-http.com
+  许可证: MIT
+  用途: HTTP 客户端库
+  功能:
+    - Promise 基于的请求
+    - 拦截器
+    - 自动 JSON 转换
+  项目使用: 前端与 FastAPI 后端通信
+
+6.5 ECharts(前端)
+  版本: 5.4.3
+  官网: https://echarts.apache.org
+  许可证: Apache 2.0
+  用途: 前端交互式图表库
+  图表: 折线、柱状、饼图、热力图、桑基图等
+  项目使用: 可视化面板的图表渲染
+
+6.6 echarts-for-react
+  版本: 3.0.2
+  官网: https://github.com/ecomfe/echarts-for-react
+  许可证: Apache 2.0
+  用途: ECharts 的 React 包装组件
+  项目使用: React 组件中集成 ECharts 图表
+
+6.7 Plotly.js (前端)
+  版本: 2.27.1
+  官网: https://plotly.com/javascript
+  许可证: MIT
+  用途: 前端交互式绘图
+  项目使用: 3D 散点、箱线图等高级交互
+
+6.8 react-plotly.js
+  版本: 2.6.0
+  官网: https://github.com/plotly/react-plotly.js
+  许可证: MIT
+  用途: React 组件包装
+  项目使用: 在 React 中集成 Plotly 图表
+
+6.9 Material-UI (MUI)
+  版本: 5.15.6
+  官网: https://mui.com
+  许可证: MIT
+  用途: UI 组件库
+  组件:
+    - Button、Card、Dialog、TextField
+    - Table、Slider、Progress
+  项目使用: 可视化系统的 UI 基础组件
+
+6.10 @mui/icons-material
+  版本: 5.15.6
+  官网: https://mui.com/material-ui/material-icons
+  许可证: MIT
+  用途: Material Design 图标库
+  项目使用: UI 操作按钮的图标
+
+6.11 Emotion
+  版本: 11.11.3 / 11.11.0 (@emotion/styled)
+  官网: https://emotion.sh
+  许可证: MIT
+  用途: CSS-in-JS 样式库
+  特性:
+    - 动态样式
+    - 作用域隔离
+  项目使用: 可视化组件样式定义
+
+6.12 Cytoscape.js
+  版本: 3.28.1
+  官网: https://js.cytoscape.org
+  许可证: MIT
+  用途: 图论图形化库(力导向图、网络图)
+  项目使用: 神经元连接关系图(面板 E)
+
+6.13 PrismJS
+  版本: 1.29.0
+  官网: https://prismjs.com
+  许可证: MIT
+  用途: 代码语法高亮库
+  功能:
+    - 支持 100+ 编程语言
+    - 轻量级、可扩展
+  项目使用: 代码展示区域(面板 K)
+
+6.14 react-markdown
+  版本: 9.0.1
+  官网: https://github.com/remarkjs/react-markdown
+  许可证: MIT
+  用途: Markdown 渲染组件
+  项目使用: 详情说明的 Markdown 渲染
+
+【7】开发工具
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+7.1 Pytest
+  版本: 8.3.3
+  官网: https://pytest.org
+  许可证: MIT
+  用途: Python 测试框架
+  功能:
+    - fixtures
+    - 参数化测试
+    - 插件生态
+  项目使用: 单元测试与集成测试
+
+7.2 Black
+  版本: 24.10.0
+  官网: https://github.com/psf/black
+  许可证: MIT
+  用途: Python 代码格式化工具
+  特性: 自动化的代码风格，无需配置
+  项目使用: 代码风格统一
+
+7.3 Ruff
+  版本: 0.6.9
+  官网: https://github.com/astral-sh/ruff
+  许可证: MIT
+  用途: 高速 Python 代码检查工具
+  检查项: PEP8、import 排序、未使用变量等
+  项目使用: 代码质量检查
+
+7.4 isort
+  版本: 5.13.2
+  官网: https://pycqa.github.io/isort
+  许可证: MIT
+  用途: Python import 语句自动排序
+  项目使用: import 组织与格式化
+
+7.5 TypeScript
+  版本: 5.3.3
+  官网: https://www.typescriptlang.org
+  许可证: Apache 2.0
+  用途: JavaScript 类型检查系统
+  功能:
+    - 静态类型检查
+    - 编译到 JavaScript
+  项目使用: 前端代码类型安全
+
+7.6 Vite
+  版本: 5.0.12
+  官网: https://vitejs.dev
+  许可证: MIT
+  用途: 现代前端构建工具
+  特性:
+    - 极快的开发服务器(ESM)
+    - 优化的生产构建
+  项目使用: 前端开发与生产构建
+
+7.7 ESLint
+  版本: 8.56.0
+  官网: https://eslint.org
+  许可证: MIT
+  用途: JavaScript/TypeScript 代码检查工具
+  功能:
+    - 语法检查
+    - 代码规范检查
+  项目使用: 前端代码质量检查
+
+7.8 @vitejs/plugin-react
+  版本: 4.2.1
+  官网: https://github.com/vitejs/vite-plugin-react
+  许可证: MIT
+  用途: Vite 的 React 插件
+  功能: 快速刷新(Fast Refresh)、JSX 转译
+  项目使用: Vite 中的 React 支持
+
+【8】特殊库
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+8.1 ModelScope
+  版本: >=1.9.0
+  官网: https://modelscope.cn
+  许可证: Apache 2.0
+  用途: 阿里 MaaS 平台，提供模型下载与推理
+  功能:
+    - 模型托管(中文模型优先)
+    - 模型版本管理
+    - API 推理服务
+  项目使用:
+    - 加载 Llama-3-8B-Instruct
+    - 加载 Llama-Guard-3-8B
+    - 作为 HuggingFace 的国内替代方案
+
+
+================================================================================
+第三部分 组件架构与使用关系
+================================================================================
+
+【1】项目结构层次
+
+                         NeuroLens
+                            |
+            ┌───────────────┬────────────────┐
+            |               |                |
+          engine/         scripts/     visualization/
+        (核心库)        (研究脚本)      (可视化系统)
+            |               |                |
+        ├─models.py    ├─pipeline/     ├─backend/
+        ├─neurons/     ├─evaluation/   │  ├─main.py
+        ├─probes/      ├─data/         │  ├─vis/
+        ├─assessment/  ├─finetuning/   │  └─requirements.txt
+        └─fine_tuning/ ├─probes/       │
+                       └─tools/        └─frontend/
+                                         ├─src/
+                                         ├─package.json
+                                         └─vite.config.ts
+
+【2】核心依赖关系链
+
+数据流向:
+  外部数据(SALAD、Utility)
+    ↓
+  [datasets] → 数据加载
+    ↓
+  [pandas + numpy] → 数据预处理
+    ↓
+  [transformers] → 模型加载与分词
+    ↓
+  [torch] → 前向传播、梯度计算
+    ↓
+  [sklearn] → 线性探针训练
+    ↓
+  [scipy] → 相似度/对齐计算
+    ↓
+  [numpy] → 神经元特征提取
+    ↓
+  结果保存
+    ↓
+  [fastapi + uvicorn] → 后端服务启动
+    ↓
+  前端访问 [react + echarts + plotly]
+    ↓
+  可视化展示
+
+训练流向:
+  [pytorch] → 微调框架
+    ↓
+  [accelerate] → 分布式加速
+    ↓
+  [bitsandbytes] → 量化优化
+    ↓
+  [wandb] → 监控追踪
+    ↓
+  [tqdm] → 进度显示
+
+配置管理:
+  [hydra] → 参数配置
+    ↓
+  [yaml] → 配置文件
+
+
+================================================================================
+第四部分 关键组件使用详解
+================================================================================
+
+【1】模型加载 (engine/models.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+依赖库: transformers, bitsandbytes, modelscope (可选)
+
+核心流程:
+  1. 设置模型路径或 HF_TOKEN / MODELSCOPE_TOKEN
+  2. 调用 AutoModelForCausalLM.from_pretrained()
+  3. (可选) 加载 4-bit 量化配置
+  4. 返回模型与分词器
+
+模型支持:
+  - 目标 LLM: Meta-Llama-3-8B-Instruct
+  - 安全分类器: Llama-Guard-3-8B
+  - 自定义模型: 任何 AutoModelForCausalLM 兼容的模型
+
+【2】神经元分析 (engine/neurons/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+依赖库: torch, numpy, sklearn, scipy
+
+核心算法:
+  - safety_identifier.py: 安全神经元识别 S(q)
+    输入: 安全提示与回复
+    输出: 按安全度排序的神经元列表
+
+  - utility_identifier.py: 效用神经元识别 U(p)
+    输入: 普通任务数据
+    输出: 按激活度排序的神经元列表
+
+  - snip_scorer.py: SNIP 重要性评分
+    公式: I = |w ⊙ ∇L|
+    用途: 离线选择关键神经元
+
+  - activation_projection.py: 激活投影
+    计算每层的激活向量 A_i^k
+    用途: 跨层激活对比分析
+
+  - parameter_alignment.py: 参数对齐
+    计算参数变化一致性 S_i^k
+    用途: 微调前后对齐评估
+
+  - quadrant_classification.py: 象限分类
+    分类维度: 安全性(S+/S-) × 激活度(A+/A-)
+    结果: 4 个象限的神经元集合
+
+【3】线性探针 (engine/probes/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+依赖库: sklearn, numpy, torch
+
+两个版本:
+  - linear_probe.py: 基础版本
+    使用 sklearn.linear_model.LogisticRegression
+
+  - linear_probe_balanced.py: 平衡版本(推荐)
+    使用 class_weight='balanced' 处理不均衡数据
+    分层训练(每层一个探针)
+    输出: 隐藏态中的有害语义表征
+
+【4】微调框架 (engine/fine_tuning/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+依赖库: torch, transformers, accelerate
+
+两个方案:
+  - TSFT (Target Safety Fine-Tuning)
+    基础目标安全微调
+
+  - VA-TSFT (Vulnerability-Aware TSFT)
+    脆弱性感知微调
+    额外考虑神经元脆弱性得分
+
+微调流程:
+  1. 初始化微调策略(目标神经元集合)
+  2. 准备数据集(安全示例)
+  3. 配置优化器与学习率(使用 Hydra)
+  4. 训练循环(使用 Accelerate 加速)
+  5. 保存增量权重(delta)
+
+【5】评估系统 (engine/assessment/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+依赖库: datasets, pandas, transformers
+
+三个评估维度:
+  1. ASR 评估 (Attack Success Rate)
+     使用 SALAD-Bench 越狱数据集
+     评估微调后的安全性改进
+
+  2. Utility 评估
+     使用 ARC、HellaSwag 等基准
+     评估微调后的效用保持
+
+  3. 报告生成
+     统计分析与可视化
+     输出 HTML/JSON 报告
+
+【6】后端 API (visualization/backend/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+依赖库: fastapi, uvicorn, pydantic, aiofiles
+
+端口: 6008
+功能:
+  - /api/status: 获取任务状态
+  - /api/neurons: 获取神经元分析结果
+  - /api/submit_task: 提交新任务(管线、微调、评估)
+  - /api/logs: 流式日志输出
+  - 静态文件托管 (9个 HTML 面板)
+
+【7】前端组件 (visualization/frontend/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+依赖库: react, echarts, plotly, zustand, axios
+
+端口: 6006 (开发) / 6008 (生产)
+技术栈:
+  - 框架: React 18 + TypeScript
+  - 路由: React Router
+  - 状态: Zustand
+  - 通信: Axios
+  - UI 组件: Material-UI
+  - 图表: ECharts + Plotly.js
+
+9 个可视化面板:
+  A - 控制面板: 任务提交、参数配置、实时日志
+  B - 指标面板: ASR / Utility 核心指标雷达图
+  C - 表征面板: 隐藏态 t-SNE/PCA 散点图
+  D - 层演化面板: 层间安全特征演化与梯度依赖
+  E - 神经元面板: 四象限神经元分类(D3/Cytoscape 连接图)
+  F - 热力图: 跨层相似度热力图
+  G - Sankey 图: 攻击路径追溯桑基图
+  H - 小提琴图: 神经元激活分布
+  K - 实例面板: 专用安全神经元与样本实例详情
+
+
+================================================================================
+第五部分 外部依赖许可证汇总
+================================================================================
+
+开源许可证分类:
+
+【MIT 许可证】(最宽松，可商业使用)
+  bitsandbytes, wandb, ruff, isort, pydantic, python-multipart,
+  aiofiles, cytoscape.js, prismjs, react-markdown, zustand,
+  axios, echarts-for-react, react-plotly.js, @emotion/react,
+  @emotion/styled, @mui/icons-material, @mui/material,
+  emotion, vite, eslint, typescript
+
+【Apache 2.0 许可证】(宽松，需声明修改)
+  transformers, accelerate, datasets, sentencepiece,
+  hydra, echarts-python, dash, fastapi,
+  plotly, echarts, @vitejs/plugin-react,
+  modelscope
+
+【BSD 许可证】(宽松，需保留版权声明)
+  pytorch, numpy, pandas, scikit-learn, scipy,
+  uvicorn, flask
+
+【Apache 2.0 + MIT 共存】
+  react, react-router-dom, react-dom
+
+特殊声明:
+  - Llama 模型: 受 Meta Llama 使用条款约束
+  - SALAD-Bench: 数据集许可由 OpenSafetyLab 规定
+  - HuggingFace: API 访问需遵守其条款
+
+
+================================================================================
+第六部分 依赖版本兼容性与约束
+================================================================================
+
+【Python 版本】
+  要求: Python 3.9+
+  推荐: Python 3.10+
+  建议原因: PyTorch 2.6 对 3.9 的支持有限
+
+【PyTorch 与 CUDA】
+  PyTorch: 2.6.0+cu124 (编译版本固定 CUDA 12.4)
+  CUDA: 12.0+ (推荐 12.4)
+  GPU 显存: 16GB+ (推荐 24GB 以上用于微调)
+
+【转换器与模型】
+  transformers 4.46.3 与 PyTorch 2.6.0 兼容性检查:
+    ✓ AutoModelForCausalLM 支持
+    ✓ 4-bit 量化支持(通过 bitsandbytes)
+    ✓ 梯度检查点支持(用于节省显存)
+
+【前端构建链】
+  Node.js: 18+ (使用 npm 18+)
+  Vite: 5.0.12 支持 React 18
+  TypeScript: 5.3.3 支持最新 React 类型
+
+【可选依赖】
+  bitsandbytes: 4-bit 量化(可选，节省显存)
+  wandb: 实验追踪(可选)
+  tensorboard: 替代 wandb 的本地方案
+
+
+================================================================================
+第七部分 常见开发场景与依赖对应
+================================================================================
+
+【场景 1】仅推理(不训练)
+  必需库: transformers, torch, numpy
+  可选库: bitsandbytes (节省显存)
+  启动: python scripts/tools/test_models.py
+
+【场景 2】神经元分析
+  必需库: torch, transformers, numpy, sklearn, scipy, pandas
+  推荐库: tqdm (进度显示)
+  启动: python scripts/pipeline/run_neurobreak_pipeline.py
+
+【场景 3】微调(无分布式)
+  必需库: torch, transformers, datasets, pandas, numpy
+  推荐库: wandb (监控)、hydra (配置)
+  启动: python scripts/finetuning/run_tsft_finetuning.py
+
+【场景 4】微调(多 GPU)
+  额外库: accelerate
+  启动: accelerate launch scripts/finetuning/run_tsft_finetuning.py
+
+【场景 5】评估 SALAD-Bench
+  必需库: datasets, transformers, torch, pandas
+  启动: python scripts/evaluation/evaluate_salad_pipeline.py
+
+【场景 6】启动可视化(生产模式)
+  后端必需库: fastapi, uvicorn, pydantic, aiofiles
+  启动: uvicorn visualization/backend/main:app --host 0.0.0.0 --port 6008
+  访问: http://localhost:6008
+
+【场景 7】可视化开发(React)
+  前端必需库: react, vite, typescript, echarts, plotly.js, zustand, axios
+  后端必需库: fastapi, uvicorn
+  启动前端: cd visualization/frontend && npm run dev
+  启动后端: cd visualization/backend && uvicorn main:app --port 6008
+  访问: http://localhost:6006
+
+
+================================================================================
+第八部分 重要事项与建议
+================================================================================
+
+【1】显存优化建议
+  问题: 模型推理/训练 显存不足(OOM)
+  解决方案:
+    - 使用 bitsandbytes 4-bit 量化: 8B 模型 → ~5GB 显存
+    - 启用梯度检查点: torch.utils.checkpoint.checkpoint()
+    - 减小 batch_size
+    - 使用 Accelerate 的自动混合精度(AMP)
+
+【2】国内网络访问问题
+  HuggingFace 下载速度慢:
+    - 使用 ModelScope(阿里)替代: export MODELSCOPE_TOKEN=xxx
+    - 手动下载后放入 ms_models/
+  PyPI 包下载慢:
+    - 配置清华 / 阿里镜像源
+
+【3】配置与实验管理
+  使用 Hydra 进行参数管理:
+    - 配置文件: configs/runtime/*.yaml
+    - 命令行覆盖: --learning_rate 1e-5 --batch_size 32
+    - 多运行输出: outputs/年-月-日/时分秒/
+
+【4】版本升级注意
+  转换器 4.46 → 5.x 的兼容性问题:
+    - API 变更: AutoModel.from_pretrained() 可能需调整
+    - 模型权重格式: SafeTensors vs PyTorch
+  建议: 暂不升级，保持 4.46.3
+
+【5】数据隐私考虑
+  SALAD-Bench 评估涉及越狱提示:
+    - 仅用于学术研究
+    - 不应用于对抗生成
+    - 遵守 OpenSafetyLab 数据使用条款
+
+【6】贡献代码规范
+  代码检查流程:
+    ```bash
+    black .
+    isort .
+    ruff check .
+    pytest
+    ```
+  提交前务必运行以上命令
+
+
+================================================================================
+第九部分 快速参考
+================================================================================
+
+【安装命令】
+  # 基础环境
+  pip install -r requirements.txt
+
+  # 可视化后端
+  pip install -r visualization/backend/requirements.txt
+
+  # 前端开发(可选)
+  cd visualization/frontend && npm install
+
+【启动服务】
+  # 后端 API (port 6008)
+  uvicorn visualization/backend/main:app --host 0.0.0.0 --port 6008
+
+  # 前端开发 (port 6006, 仅开发时)
+  cd visualization/frontend && npm run dev
+
+  # 访问生产可视化
+  http://localhost:6008
+
+  # 访问前端开发
+  http://localhost:6006
+
+【常用脚本】
+  # 完整管线
+  python scripts/pipeline/run_neurobreak_pipeline.py
+
+  # 神经元识别
+  python scripts/pipeline/run_safety_identifier_salad.py
+  python scripts/pipeline/run_utility_identifier.py
+
+  # 微调
+  python scripts/finetuning/run_tsft_finetuning.py
+
+  # 评估
+  python scripts/evaluation/evaluate_salad_pipeline.py
+
+【代码质量检查】
+  black .           # 格式化
+  isort .           # import 排序
+  ruff check .      # 代码检查
+  pytest            # 单元测试
+
+【环境诊断】
+  python scripts/tools/check_gpu.py        # GPU 检查
+  python scripts/tools/check_models.py     # 模型检查
+  python scripts/tools/test_models.py      # 推理测试
+
+
+================================================================================
+结论
+================================================================================
+
+NeuroLens 项目通过整合 50+ 个开源库，实现了一套完整的大语言模型安全
+神经元分析与可视化研究平台。核心依赖分为以下几个层级:
+
+  1. 深度学习底层: PyTorch + Transformers (模型加载与计算)
+  2. 数据处理层: NumPy + Pandas + SciPy (数据与统计)
+  3. 算法层: Scikit-Learn (线性探针) + 自定义神经元算法
+  4. 服务层: FastAPI + Uvicorn (Web API)
+  5. 前端层: React + ECharts + Plotly (交互式可视化)
+  6. 工具层: Hydra (配置) + pytest (测试) + Black/Ruff (代码质量)
+
+所有依赖均为开源项目，主要采用 MIT、Apache 2.0、BSD 等宽松许可证，
+确保学术研究和商业应用的灵活性。
+
+项目的模块化设计使得研究人员可以独立调用各子模块(神经元分析、微调、
+评估)，也可通过完整管线 run_neurobreak_pipeline.py 一键执行全流程。
+
+后续维护与扩展建议:
+  - 定期检查依赖更新(特别是 PyTorch/Transformers 主版本)
+  - 监控 SALAD-Bench 数据集的最新版本
+  - 考虑支持量化推理(GGML、TensorRT)以降低部署成本
+  - 增强前端响应式设计以支持移动端预览
+
+
+================================================================================
+文档版本: 1.0
+更新时间: 2026年4月12日
+维护者: NeuroLens 项目团队
+================================================================================

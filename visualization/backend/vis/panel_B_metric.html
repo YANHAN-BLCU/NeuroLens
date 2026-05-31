@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metric View B</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        body {
+            padding: 16px;
+            background-color: #ffffff;
+            height: 100vh;
+            overflow: auto;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .meta-info {
+            font-size: 11px;
+            color: #888;
+        }
+
+        .chart-container {
+            width: 100%;
+            height: calc(100vh - 80px);
+        }
+
+        .no-data {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: #999;
+            font-size: 13px;
+        }
+    </style>
+    <script src="/vis/echarts.min.js"></script>
+</head>
+<body>
+    <div class="panel-header">
+        <div class="panel-title" id="panelTitle">Metric View B</div>
+        <div class="meta-info" id="metaInfo"></div>
+    </div>
+
+    <div class="chart-container" id="metricChart"></div>
+
+    <script>
+        const chartDom = document.getElementById('metricChart');
+        const myChart = echarts.init(chartDom);
+        let currentLangB = localStorage.getItem('language') || 'en';
+
+        const translations = {
+            en: {
+                title: 'Metric View B',
+                noData: 'No evaluation data available. Run pipeline first.',
+                asr: 'ASR',
+                samples: 'samples',
+                jailbreaks: 'jailbreaks',
+                overall: 'Overall ASR',
+            },
+            zh: {
+                title: '度量视图 B',
+                noData: '暂无评估数据，请先运行 Pipeline。',
+                asr: 'ASR',
+                samples: '条样本',
+                jailbreaks: '条越狱',
+                overall: '总体 ASR',
+            }
+        };
+
+        // 攻击方法名称规范化
+        const METHOD_LABELS = {
+            autodan: 'AutoDAN',
+            auto_dan: 'AutoDAN',
+            gcg: 'GCG',
+            gcg_llama: 'GCG',
+            gptfuzz: 'GPTFuzz',
+            'gpt-fuzzer': 'GPTFuzz',
+            gptfuzzer: 'GPTFuzz',
+            tap: 'TAP',
+            jb: 'JB',
+            manual: 'Manual',
+            'hh-red-team': 'Manual',
+        };
+
+        function normalizeMethodName(raw) {
+            return METHOD_LABELS[raw.toLowerCase()] || raw;
+        }
+
+        async function loadData() {
+            try {
+                const resp = await fetch('/api/metrics');
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                if (!data.asr_by_attack || Object.keys(data.asr_by_attack).length === 0) return null;
+                return data;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        async function renderChart() {
+            const t = translations[currentLangB] || translations.en;
+            const data = await loadData();
+
+            if (!data) {
+                myChart.clear();
+                chartDom.innerHTML = `<div class="no-data">${t.noData}</div>`;
+                document.getElementById('metaInfo').textContent = '';
+                return;
+            }
+
+            // 构建指标列表：每个攻击方法一个轴
+            const rawEntries = Object.entries(data.asr_by_attack);
+            // 合并同名（规范化后相同）的方法，取最大值
+            const merged = {};
+            for (const [key, val] of rawEntries) {
+                const label = normalizeMethodName(key);
+                merged[label] = Math.max(merged[label] ?? 0, val);
+            }
+
+            const labels = Object.keys(merged);
+            const values = labels.map(l => +(merged[l] * 100).toFixed(1));
+
+            const indicator = labels.map(name => ({ name, max: 100 }));
+
+            const option = {
+                tooltip: {
+                    trigger: 'item',
+                    formatter: (params) => {
+                        const lines = params.value.map((v, i) =>
+                            `${indicator[i].name}: ${v.toFixed(1)}%`
+                        );
+                        return lines.join('<br/>');
+                    }
+                },
+                radar: {
+                    indicator,
+                    center: ['50%', '52%'],
+                    radius: '68%',
+                    axisName: {
+                        color: '#555',
+                        fontSize: 12,
+                    },
+                    splitArea: {
+                        areaStyle: {
+                            color: ['rgba(240,244,255,0.4)', 'rgba(220,228,255,0.4)',
+                                    'rgba(200,212,255,0.4)', 'rgba(180,196,255,0.4)',
+                                    'rgba(160,180,255,0.4)']
+                        }
+                    },
+                    axisLine: { lineStyle: { color: '#c8d0e8' } },
+                    splitLine: { lineStyle: { color: '#c8d0e8' } },
+                },
+                series: [{
+                    type: 'radar',
+                    data: [{
+                        value: values,
+                        name: t.asr,
+                        itemStyle: { color: '#487DB2' },
+                        areaStyle: { color: 'rgba(72,125,178,0.35)' },
+                        lineStyle: { width: 2, color: '#487DB2' },
+                        symbol: 'circle',
+                        symbolSize: 5,
+                    }]
+                }]
+            };
+
+            myChart.clear();
+            // 清除可能残留的 no-data div
+            const noDataEl = chartDom.querySelector('.no-data');
+            if (noDataEl) noDataEl.remove();
+            myChart.setOption(option);
+
+            // 更新元信息
+            const meta = [];
+            if (data.num_samples) meta.push(`${data.num_samples} ${t.samples}`);
+            if (data.num_jailbreak) meta.push(`${data.num_jailbreak} ${t.jailbreaks}`);
+            if (data.overall_asr != null) meta.push(`${t.overall}: ${(data.overall_asr * 100).toFixed(1)}%`);
+            document.getElementById('metaInfo').textContent = meta.join('  |  ');
+        }
+
+        function updatePanelBLanguage(lang) {
+            currentLangB = lang;
+            document.getElementById('panelTitle').textContent =
+                (translations[lang] || translations.en).title;
+            renderChart();
+        }
+
+        window.addEventListener('message', (e) => {
+            if (e.data?.type === 'languageChange') updatePanelBLanguage(e.data.lang);
+        });
+
+        window.addEventListener('resize', () => myChart.resize());
+
+        // 监听模型切换，刷新数据
+        window.addEventListener('message', (e) => {
+            if (e.data?.type === 'model_switched') renderChart();
+        });
+
+        currentLangB = localStorage.getItem('language') || 'en';
+        renderChart();
+    </script>
+</body>
+</html>

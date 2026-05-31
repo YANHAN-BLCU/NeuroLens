@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-05-31T20:03:07.761949",
+  "model_name": "chinese-ner-per-addr-rbt3",
+  "task_type": "ner",
+  "test_level": "quick",
+  "num_samples": 115,
+  "entity_f1": 0.9351,
+  "entity_precision": 0.9301,
+  "entity_recall": 0.9402,
+  "exact_match_rate": 0.9043,
+  "eval_time": 0.8,
+  "load_time": 46.0,
+  "speed_samples_per_sec": 151.68
+}

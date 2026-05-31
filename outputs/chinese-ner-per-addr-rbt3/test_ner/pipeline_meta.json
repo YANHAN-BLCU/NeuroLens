@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-05-31T20:03:07.761949",
+  "model_name": "chinese-ner-per-addr-rbt3",
+  "model_path": "c:\\Projects\\NL\\NeuroLens\\visualization\\backend\\Desensization-dashboard\\models\\chinese-ner-per-addr-rbt3",
+  "task_type": "ner",
+  "test_level": "quick",
+  "num_samples": 115,
+  "entity_f1": 0.9351,
+  "total_time_seconds": 46.8,
+  "output_dir": "c:\\Projects\\NL\\NeuroLens\\outputs\\chinese-ner-per-addr-rbt3\\test_ner"
+}

@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Layer View D: Layer-wise Representation and Gradient Dependency Analysis for LLM Jailbreak Cases</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    body {
+      padding: 16px;
+      background-color: #ffffff;
+      height: 100vh;
+      overflow: auto;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .panel-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .control-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      user-select: none;
+      font-size: 12px;
+    }
+
+    .checkbox-label input {
+      accent-color: #2563eb;
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 16px;
+      font-size: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend-box {
+      width: 20px;
+      height: 4px;
+      border-radius: 2px;
+    }
+
+    .chart-container {
+      flex: 1;
+      min-height: 0;
+      /* 让 D 图区域在内容超出时出现单独的横向滚动条 */
+      overflow-x: auto;
+      overflow-y: visible;
+    }
+
+    #streamChart,
+    #gradientChart {
+      width: 100%;
+      /* 统一外框 .chart-group 提供边框和背景，子图表容器本身不再绘制独立边框 */
+      border-radius: 0;
+      background: transparent;
+      border: none;
+      overflow: visible;
+    }
+
+    #streamChart {
+      height: 420px;
+      min-height: 250px;
+    }
+
+    #gradientChart {
+      /* 提高 D2 可视高度，避免在有横向滚动条时被压扁导致方块看起来不方 */
+      height: 80px;
+      min-height: 80px;
+      margin-top: -5px;
+    }
+
+    .status-bar {
+      font-size: 11px;
+      color: #666;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 6px;
+      padding: 8px 0;
+    }
+
+    .status-bar .right {
+      text-align: right;
+    }
+
+    select {
+      padding: 4px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    /* 圆形 D1 / D2 标记，贴近图表左上角，与示例风格接近 */
+    .corner-tag {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 1px solid #d1d5db;
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: #374151;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+      z-index: 10;
+    }
+
+    /* D2 整体（含灰色圆角 D2 标记）略微上移，保持与图表相对位置不变 */
+    .chart-group .chart-wrapper:nth-of-type(2) {
+      margin-top: -2px;
+    }
+
+    .chart-group .chart-wrapper:nth-of-type(2) .corner-tag {
+      /* 将 D2 标签整体上移，与图表更贴近 */
+      top: 20px;
+    }
+
+    .chart-wrapper {
+      position: relative;
+    }
+
+    /* 统一包裹 D1 + D2 的整体外框 */
+    .chart-group {
+      /* 内部内容做成比视口更宽，这样在小屏幕上可以左右滚动查看全部层 */
+      min-width: 1200px;
+      overflow: visible;
+      padding: 8px 0;
+    }
+  </style>
+  <script src="/vis/echarts.min.js"></script>
+</head>
+<body>
+  <div class="panel-header">
+    <div class="panel-title">Layer View D</div>
+    <div class="controls">
+      <div class="control-group">
+        <select id="subsetSelect">
+          <option value="all">All instances (success + failure)</option>
+          <option value="success-only">Successful jailbreak cases only</option>
+          <option value="fail-only">Failed jailbreak cases only</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-container">
+    <div class="chart-group">
+      <div class="chart-wrapper">
+        <div class="corner-tag">D1</div>
+        <div id="streamChart"></div>
+      </div>
+
+      <div class="status-bar" style="margin-bottom: -20px;">
+        <div></div>
+        <div class="right" id="streamSummaryText">
+          Loading stream graph data…
+        </div>
+      </div>
+
+      <div class="chart-wrapper">
+        <div class="corner-tag">D2</div>
+        <div id="gradientChart"></div>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <div>
+        <span class="key"></span>
+      </div>
+      <div class="right" id="gradientSummaryText">
+        Loading gradient dependency data…
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-box" style="background: rgba(217, 95, 2, 0.4); border: 2px solid #d95f02;"></div>
+      <span>Successful jailbreak (mean±std)</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-box" style="background: rgba(27, 127, 189, 0.4); border: 2px solid #1b7fbd;"></div>
+      <span>Failed jailbreak (mean±std)</span>
+    </div>
+    <div class="legend-item">
+      <div style="width:20px;border-top:2px solid #9ca3af;"></div>
+      <span>Boundary: mean±std</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-box" style="background: rgba(128,128,128,0.25); width:14px; height:10px;"></div>
+      <span>Fill: ±std range</span>
+    </div>
+  </div>
+
+
+  <script>
+    /**
+     * D1：加载流图数据（成功 / 失败越狱实例在各层的 toixc/benign 方向统计）
+     * 结构示例：
+     * [
+     *   {
+     *     "layer": 0,
+     *     "success": {
+     *       "mean": ...,
+     *       "std": ...,
+     *       "q1": ...,
+     *       "q3": ...,
+     *       "count": ...
+     *     },
+     *     "fail": { ... }
+     *   },
+     *   ...
+     * ]
+     */
+    async function loadStreamgraphData() {
+      // 数据目录 layer_evolution 位于项目根目录，当前 HTML 在 vis/ 子目录
+      const resp = await fetch("../outputs/layer_evolution/streamgraph_data.json");
+      if (!resp.ok) {
+        throw new Error("Failed to load stream graph data: " + resp.status + " " + resp.statusText);
+      }
+      /** @type {{layer:number; success:any; fail:any}[]} */
+      const raw = await resp.json();
+      raw.sort((a, b) => a.layer - b.layer);
+      // 保留原始层范围（例如 0–32），不再裁剪
+      return raw;
+    }
+
+    /**
+     * 构建 D1 折线填充图配置：
+     * - 四条光滑曲线：成功越狱-基线(mean-std)、成功越狱(mean+std)、失败越狱-基线(mean-std)、失败越狱(mean+std)
+     * - 在基线和上边界之间填充颜色
+     * - y=0 作为 "安全 / 有害决策边界"
+     * - 适合论文/项目报告的干净清晰风格
+     */
+    function buildStreamgraphOption(streamData, subset) {
+      const filtered = streamData;
+      const layers = filtered.map((d) => d.layer);
+      
+      // Get current language
+      const lang = (localStorage.getItem("language") || "en");
+      const isZh = lang === "zh";
+      const boundaryLabel = isZh ? "安全/有害决策边界" : "Safe / harmful decision boundary";
+
+      // 四条线的数据：基线(mean-std) 和 上边界(mean+std)
+      const successLow = [];   // 成功越狱-基线
+      const successHigh = [];  // 成功越狱
+      const failLow = [];      // 失败越狱-基线
+      const failHigh = [];     // 失败越狱
+
+      let maxPos = 0;
+      let minNeg = 0;
+
+      for (const d of filtered) {
+        const sMean = d.success?.mean ?? 0;
+        const sStd = d.success?.std ?? 0;
+        const fMean = d.fail?.mean ?? 0;
+        const fStd = d.fail?.std ?? 0;
+
+        const sLow = sMean - sStd;
+        const sHigh = sMean + sStd;
+        const fLow = fMean - fStd;
+        const fHigh = fMean + fStd;
+
+        successLow.push(sLow);
+        successHigh.push(sHigh);
+        failLow.push(fLow);
+        failHigh.push(fHigh);
+
+        maxPos = Math.max(maxPos, sHigh, fHigh);
+        minNeg = Math.min(minNeg, sLow, fLow);
+      }
+
+      /** @type {any[]} */
+      const series = [];
+
+      // 论文风格配置
+      const lineWidth = 1.8;
+      const smoothValue = 0.4;
+
+      // 橙色系（成功越狱）- 学术论文常用配色
+      const orangeColor = "#d95f02";
+      const orangeFill = "rgba(217, 95, 2, 0.25)";
+
+      // 蓝色系（失败越狱）- 学术论文常用配色
+      const blueColor = "#1b7fbd";
+      const blueFill = "rgba(27, 127, 189, 0.25)";
+
+      // 计算带宽数据（用于堆叠填充）
+      const successBand = successHigh.map((h, i) => h - successLow[i]);
+      const failBand = failHigh.map((h, i) => h - failLow[i]);
+
+      if (subset === "all" || subset === "success-only") {
+        series.push(
+          // 成功越狱-基线（mean - std）：透明填充作为堆叠基础
+          {
+            name: "Successful jailbreak - baseline",
+            type: "line",
+            stack: "success",
+            // 允许负值与正值一起参与堆叠，保证 mean-std 为真正的下边界
+            stackStrategy: "all",
+            data: successLow,
+            smooth: smoothValue,
+            showSymbol: false,
+            lineStyle: { width: lineWidth, color: orangeColor },
+            itemStyle: { color: orangeColor },
+            areaStyle: { opacity: 0 },  // 透明，不显示
+            z: 10
+          },
+          // 成功越狱（mean + std）：堆叠在基线上，填充带状区域
+          {
+            name: "Successful jailbreak",
+            type: "line",
+            stack: "success",
+            // 允许跨过 0 继续堆叠，填充区域真正覆盖 mean-std ~ mean+std
+            stackStrategy: "all",
+            data: successBand,  // 使用差值，堆叠后等于 successHigh
+            smooth: smoothValue,
+            showSymbol: false,
+            lineStyle: { width: lineWidth, color: orangeColor },
+            itemStyle: { color: orangeColor },
+            areaStyle: { color: orangeFill },  // 填充两线之间
+            z: 11
+          }
+        );
+      }
+
+      if (subset === "all" || subset === "fail-only") {
+        series.push(
+          // 失败越狱-基线（mean - std）：透明填充作为堆叠基础
+          {
+            name: "Failed jailbreak - baseline",
+            type: "line",
+            stack: "fail",
+            // 同样对失败越狱启用“全堆叠”，避免在 0 截断
+            stackStrategy: "all",
+            data: failLow,
+            smooth: smoothValue,
+            showSymbol: false,
+            lineStyle: { width: lineWidth, color: blueColor },
+            itemStyle: { color: blueColor },
+            areaStyle: { opacity: 0 },  // 透明，不显示
+            z: 8
+          },
+          // 失败越狱（mean + std）：堆叠在基线上，填充带状区域
+          {
+            name: "Failed jailbreak",
+            type: "line",
+            stack: "fail",
+            // 确保填充区域完整覆盖 mean-std ~ mean+std
+            stackStrategy: "all",
+            data: failBand,  // 使用差值，堆叠后等于 failHigh
+            smooth: smoothValue,
+            showSymbol: false,
+            lineStyle: { width: lineWidth, color: blueColor },
+            itemStyle: { color: blueColor },
+            areaStyle: { color: blueFill },  // 填充两线之间
+            z: 9
+          }
+        );
+      }
+
+
+
+      return {
+        backgroundColor: "transparent",
+        tooltip: {
+          trigger: "axis",
+          axisPointer: {
+            type: "line",
+            lineStyle: {
+              color: "rgba(148, 163, 184, 0.7)",
+              width: 1,
+              type: "dashed"
+            }
+          },
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: "rgba(148, 163, 184, 0.5)",
+          backgroundColor: "rgba(15, 23, 42, 0.96)",
+          textStyle: {
+            color: "#e5e7eb",
+            fontSize: 11
+          },
+          formatter: function (params) {
+            if (!Array.isArray(params) || params.length === 0) {
+              return "";
+            }
+            const first = params[0];
+            const layerIdx = first.dataIndex;
+            const d = filtered[layerIdx];
+            if (!d) return "";
+
+            const s = d.success;
+            const f = d.fail;
+
+            const lines = [];
+            lines.push(
+              "<div style='font-size:12px;margin-bottom:4px;'>" +
+                (isZh ? "层 " : "Layer ") +
+                d.layer +
+                "</div>"
+            );
+
+            if (subset === "all" || subset === "success-only") {
+              lines.push(
+                "<div style='font-size:11px;color:#d95f02;margin-top:2px;font-weight:500;'>" +
+                  (isZh ? "成功越狱案例" : "Successful jailbreak cases") +
+                  "</div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" +
+                  (isZh ? "均值: " : "mean: ") +
+                  "<span style='color:#e5e7eb;'>" +
+                  s.mean.toFixed(3) +
+                  "</span> · " +
+                  (isZh ? "标准差: " : "std: ") +
+                  "<span style='color:#e5e7eb;'>" +
+                  s.std.toFixed(3) +
+                  "</span></div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" +
+                  (isZh ? "四分位 Q1/Q3: " : "q1 / q3: ") +
+                  "<span style='color:#e5e7eb;'>" +
+                  s.q1.toFixed(3) +
+                  " / " +
+                  s.q3.toFixed(3) +
+                  "</span></div>"
+              );
+            }
+
+            if (subset === "all" || subset === "fail-only") {
+              lines.push(
+                "<div style='font-size:11px;color:#1b7fbd;margin-top:4px;font-weight:500;'>" +
+                  (isZh ? "失败越狱案例" : "Failed jailbreak cases") +
+                  "</div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" +
+                  (isZh ? "均值: " : "mean: ") +
+                  "<span style='color:#e5e7eb;'>" +
+                  f.mean.toFixed(3) +
+                  "</span> · " +
+                  (isZh ? "标准差: " : "std: ") +
+                  "<span style='color:#e5e7eb;'>" +
+                  f.std.toFixed(3) +
+                  "</span></div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" +
+                  (isZh ? "四分位 Q1/Q3: " : "q1 / q3: ") +
+                  "<span style='color:#e5e7eb;'>" +
+                  f.q1.toFixed(3) +
+                  " / " +
+                  f.q3.toFixed(3) +
+                  "</span></div>"
+              );
+            }
+
+            lines.push(
+              "<div style='font-size:11px;color:#6b7280;margin-top:4px;'>" +
+                (isZh ? "虚线 y=0 表示安全/有害决策边界" : "Dashed line y=0 denotes the safe / harmful decision boundary") +
+                "</div>"
+            );
+
+            return lines.join("");
+          }
+        },
+        grid: {
+          left: 36,
+          right: 20,
+          top: 20,
+          bottom: 28
+        },
+        xAxis: {
+          type: "category",
+          boundaryGap: false,
+          data: layers,
+          //name: "层（Layer 0–32，自下而上）",
+          nameLocation: "middle",
+          nameGap: 22,
+          axisLine: {
+            lineStyle: {
+              color: "#4b5563"
+            }
+          },
+          axisLabel: {
+            color: "#9ca3af",
+            fontSize: 10
+          },
+          axisTick: {
+            show: false
+          }
+        },
+        yAxis: {
+          type: "value",
+          nameLocation: "middle",
+          nameGap: 28,
+          axisLine: {
+            show: false
+          },
+          axisLabel: {
+            color: "#9ca3af",
+            fontSize: 10
+          },
+          splitLine: {
+            lineStyle: {
+              color: "rgba(55, 65, 81, 0.7)",
+              type: "dashed"
+            }
+          },
+          min: Math.min(minNeg * 1.2, -0.5),
+          max: Math.max(maxPos * 1.2, 0.5)
+        },
+        series,
+        graphic: [
+          {
+            type: "line",
+            shape: {
+              x1: 0,
+              x2: "100%",
+              y1: 0,
+              y2: 0
+            }
+          }
+        ],
+        markLine: {
+          silent: true,
+          symbol: "none",
+          label: {
+            show: true,
+            position: "end",
+            formatter: boundaryLabel,
+            color: "#9ca3af",
+            fontSize: 10,
+            padding: [2, 4, 2, 4],
+            backgroundColor: "rgba(15, 23, 42, 0.9)",
+            borderRadius: 4
+          },
+          lineStyle: {
+            color: "rgba(148, 163, 184, 0.6)",
+            type: "dashed",
+            width: 1
+          },
+          data: [
+            {
+              yAxis: 0
+            }
+          ]
+        }
+      };
+    }
+
+    /**
+     * D2：从 gradient_dependency_visualization.json 中聚合层间梯度依赖
+     * 从 gradient_dependency_visualization.json 中聚合层间梯度依赖
+     * 结构示例：
+     * {
+     *   "layer_31_neuron_4062": {
+     *     "target_neuron": [31, 4062],
+     *     "upstream_neurons": [[30, 4062], [30, 788], ...],
+     *     "gradient_strengths": [1.0, 0.51, ...],
+     *     "mean_gradient_strength": ...,
+     *     "max_gradient_strength": ...
+     *   },
+     *   ...
+     * }
+     */
+    // 让 D2 的灰色方块在像素级对齐 D1 的横轴刻度：
+    // - layerPixelPositions[layer] 保存该层在 D1 图表中的像素 x 坐标
+    // - gradientAlignScale = (D2 宽度 / D1 宽度)，用于把 D1 的像素坐标映射到 D2 画布
+    let layerPixelPositions = null;
+    let gradientAlignScale = 1;
+    // 跨 D1 / D2 联动用：记录每一层对应的 D2 节点索引，以及“语义偏移最显著层”
+    let gradientNodeIndexByLayer = {};
+    let pivotLayerGlobal = null;
+    async function loadGradientDependencies() {
+      // 数据目录 gradient_dependency 位于项目根目录，当前 HTML 在 vis/ 子目录
+      const resp = await fetch("../outputs/gradient_dependency/gradient_dependency_visualization.json");
+      if (!resp.ok) {
+        throw new Error("Failed to load gradient dependency data: " + resp.status + " " + resp.statusText);
+      }
+      /** @type {Record<string, {target_neuron: [number, number]; upstream_neurons: [number, number][]; gradient_strengths: number[];}>} */
+      const raw = await resp.json();
+
+      /** @type {Map<string, {from_layer: number; to_layer: number; sum: number; count: number; max: number;}>} */
+      const edgeAgg = new Map();
+      /** @type {Set<number>} */
+      const layerSet = new Set();
+
+      let totalPairs = 0;
+
+      for (const key in raw) {
+        const entry = raw[key];
+        if (!entry || !entry.target_neuron || !entry.upstream_neurons || !entry.gradient_strengths) continue;
+
+        const toLayer = entry.target_neuron[0];
+        const upstream = entry.upstream_neurons;
+        const strengths = entry.gradient_strengths;
+
+        if (!Array.isArray(upstream) || !Array.isArray(strengths)) continue;
+
+        layerSet.add(toLayer);
+
+        const len = Math.min(upstream.length, strengths.length);
+        for (let i = 0; i < len; i++) {
+          const u = upstream[i];
+          const s = strengths[i];
+          if (!Array.isArray(u) || u.length < 1) continue;
+          const fromLayer = u[0];
+          // 保留 0–32 范围内的所有层间依赖关系
+          if (
+            typeof fromLayer !== "number" ||
+            typeof toLayer !== "number" ||
+            typeof s !== "number"
+          ) {
+            continue;
+          }
+
+          layerSet.add(fromLayer);
+          totalPairs += 1;
+
+          const edgeKey = fromLayer + "-" + toLayer;
+          let agg = edgeAgg.get(edgeKey);
+          if (!agg) {
+            agg = {
+              from_layer: fromLayer,
+              to_layer: toLayer,
+              sum: 0,
+              count: 0,
+              max: 0
+            };
+            edgeAgg.set(edgeKey, agg);
+          }
+          agg.sum += s;
+          agg.count += 1;
+          if (s > agg.max) agg.max = s;
+        }
+      }
+
+      /** 归一化并构造最终边列表 */
+      /** @type {{from_layer: number; to_layer: number; strength: number; mean_strength: number; max_strength: number;}[]} */
+      const edges = [];
+
+      for (const [, agg] of edgeAgg) {
+        const strength = agg.sum; // 可以改成 agg.sum / agg.count 代表平均强度
+        const mean = agg.sum / Math.max(1, agg.count);
+        edges.push({
+          from_layer: agg.from_layer,
+          to_layer: agg.to_layer,
+          strength,
+          mean_strength: mean,
+          max_strength: agg.max
+        });
+      }
+
+      // 强制补齐 0–32 的所有层，使得即便某些层在梯度依赖中没有出现（如 7 / 8 / 9），
+      // 也会在 D2 中渲染出对应的灰色小方块，与 D1 的层轴一一对齐。
+      for (let L = 0; L <= 32; L++) {
+        layerSet.add(L);
+      }
+
+      // 计算归一化所需的全局最大强度（保留 Layer 0–32 的全部层间依赖）
+      let globalMax = 0;
+      for (const e of edges) {
+        if (e.strength > globalMax) globalMax = e.strength;
+      }
+
+      // 按强度从大到小排序，方便后续按比例截断
+      edges.sort((a, b) => b.strength - a.strength);
+
+      // 恢复显示 Layer 0–32 的全部层级方块（包括在依赖数据中未出现的层）
+      const layers = Array.from(layerSet.values()).sort((a, b) => a - b);
+
+      return {
+        layers,
+        edges,
+        maxStrength: globalMax,
+        totalPairs
+      };
+    }
+
+    function buildGradientGraphOption(data, thresholdRatio) {
+      const { layers, edges, maxStrength } = data;
+
+      const minRatio = Math.max(0, Math.min(1, thresholdRatio));
+      // ratio=1 表示显示全部边，ratio=0.1 表示只显示最强的 10%
+      const cutoffIndex = Math.floor(edges.length * minRatio) - 1;
+
+      /** 生效的边列表（按强度过滤），同时移除所有同层依赖边 */
+      const visibleEdgesRaw = edges.filter((edge, idx) => {
+        if (edge.from_layer === edge.to_layer) return false;
+        // 按排序索引过滤：只保留最强的 top 份额
+        // edges 已按强度从大到小排序，idx <= cutoffIndex 即为最强的部分
+        return idx <= cutoffIndex;
+      });
+
+      // 如果阈值过高导致没有边，至少保证显示最强的一条
+      const visibleEdges = visibleEdgesRaw.length > 0 ? visibleEdgesRaw : edges.slice(0, 1);
+
+      // 统计节点的入/出强度
+      /** @type {Record<number, {inStrength: number; outStrength: number;}>} */
+      const layerStats = {};
+      for (const layer of layers) {
+        layerStats[layer] = { inStrength: 0, outStrength: 0 };
+      }
+
+      for (const e of visibleEdges) {
+        const ratio = e.strength / Math.max(1e-9, maxStrength);
+        const weight = ratio; // 用归一化后的强度作为权重
+        layerStats[e.from_layer].outStrength += weight;
+        layerStats[e.to_layer].inStrength += weight;
+      }
+
+      // 构造节点
+      const maxFlow = Math.max(
+        ...layers.map((L) => layerStats[L].inStrength + layerStats[L].outStrength),
+        1e-6
+      );
+
+      const nodes = layers.map((L, idx) => {
+        const stat = layerStats[L];
+        const totalFlow = stat.inStrength + stat.outStrength;
+        // 控制正方形尺寸在较窄范围内变化，避免在不同缩放 / 滚动下产生“长方形”的视觉错觉
+        const sizeBase = 14;
+        const sizeRange = 8;
+        const size = sizeBase + (totalFlow / maxFlow) * sizeRange;
+
+        return {
+          id: String(L),
+          name: "Layer " + L,
+          value: totalFlow,
+          symbol: "rect",
+          // 使用 [宽, 高] 数组确保是正方形
+          symbolSize: [size, size],
+          // 在 layout: "none" 模式下，x/y 是像素坐标而非数据坐标
+          // 我们需要根据 idx 手动计算像素位置，但这里先用相对值
+          // ECharts 会将 x/y 范围映射到 left/right/top/bottom 区域
+          // 为避免 y 范围为 0 导致的问题，给 y 一个小的变化
+          x: idx,
+          y: 0,
+          itemStyle: {
+            color: totalFlow > 0 ? "#9ca3af" : "#e5e7eb",
+            borderColor: "#6b7280",
+            borderWidth: 1
+          },
+          label: {
+            // 按需求：移除 D2 中灰色方块旁边的 "Layer + 数字" 文本标签
+            show: false,
+            color: "#374151",
+            fontSize: 11
+          }
+        };
+      });
+
+      // 更新“层 → D2 节点索引”的映射，供跨视图联动使用
+      gradientNodeIndexByLayer = {};
+      nodes.forEach((node, idx) => {
+        const L = Number(node.id);
+        if (!Number.isNaN(L)) {
+          gradientNodeIndexByLayer[L] = idx;
+        }
+      });
+
+      // 计算可见边的强度范围，用于归一化
+      const visibleStrengths = visibleEdges.map(e => e.strength);
+      const minVisibleStrength = Math.min(...visibleStrengths);
+      const maxVisibleStrength = Math.max(...visibleStrengths);
+      // 使用对数缩放，让弱连接也能清晰显示
+      const logMin = Math.log(minVisibleStrength + 1e-9);
+      const logMax = Math.log(maxVisibleStrength + 1e-9);
+      const logRange = Math.max(logMax - logMin, 1e-6);
+
+      // 构造边：弧形连线，向下弯曲
+      const links = visibleEdges.map((e) => {
+        // 使用对数缩放的比例，让弱连接也能看到
+        const logStrength = Math.log(e.strength + 1e-9);
+        const ratio = (logStrength - logMin) / logRange;
+        // 线条粗细：最小 1px，最大 3px，更细腻
+        const width = 1 + ratio * 2;
+        // 使用更淡雅的蓝灰色调，从浅到深
+        const color = echarts.color.lerp(ratio, ["#cbd5e1", "#94a3b8"]);
+
+        // 计算弧度：距离越远，弧度越大；负值使弧线向下弯曲
+        const layerDiff = Math.abs(e.to_layer - e.from_layer);
+        // 同层依赖用正弧度（向上），跨层依赖用负弧度（向下）
+        // 增大 curveness 值使弧线更明显
+        let curveness;
+        if (e.from_layer === e.to_layer) {
+          // 同层依赖：向上弯曲，弧度较大
+          curveness = 0.8;
+        } else {
+          // 跨层依赖：向下弯曲，根据层距调整弧度
+          // 相邻层用较大弧度，远距离层用较小弧度（避免弧线太长）
+          curveness = -(0.5 + Math.min(layerDiff, 10) / 10 * 0.5);
+        }
+
+        return {
+          source: String(e.from_layer),
+          target: String(e.to_layer),
+          lineStyle: {
+            width,
+            color,
+            opacity: 0.35 + 0.35 * ratio,
+            curveness: curveness
+          },
+          value: e.strength,
+          raw: e
+        };
+      });
+
+      return {
+        backgroundColor: "transparent",
+        tooltip: {
+          trigger: "item",
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: "rgba(148, 163, 184, 0.5)",
+          backgroundColor: "rgba(15, 23, 42, 0.96)",
+          textStyle: {
+            color: "#e5e7eb",
+            fontSize: 11
+          },
+          formatter: function (params) {
+            const lang = (localStorage.getItem("language") || "en");
+            const isZh = lang === "zh";
+            
+            if (params.dataType === "node") {
+              const L = Number(params.data.id);
+              const stat = layerStats[L];
+              const inS = stat.inStrength;
+              const outS = stat.outStrength;
+              const total = inS + outS;
+              return [
+                "<div style='font-size:12px;margin-bottom:4px;'>" + (isZh ? "层 " : "Layer ") + L + "</div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" + (isZh ? "入向梯度：" : "In-gradient:") + "<span style='color:#e5e7eb;'>" + inS.toFixed(3) + "</span></div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" + (isZh ? "出向梯度：" : "Out-gradient:") + "<span style='color:#e5e7eb;'>" + outS.toFixed(3) + "</span></div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" + (isZh ? "总流量：" : "Total flow:") + "<span style='color:#e5e7eb;'>" + total.toFixed(3) + "</span></div>"
+              ].join("");
+            }
+            if (params.dataType === "edge" && params.data && params.data.raw) {
+              const e = params.data.raw;
+              return [
+                "<div style='font-size:12px;margin-bottom:4px;'>" + (isZh ? "层 " : "Layer ") + e.from_layer + " → " + (isZh ? "层 " : "Layer ") + e.to_layer + "</div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" + (isZh ? "聚合强度（总和）：" : "Aggregation (sum):") + "<span style='color:#e5e7eb;'>" + e.strength.toFixed(4) + "</span></div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" + (isZh ? "平均强度（均值）：" : "Mean strength (mean):") + "<span style='color:#e5e7eb;'>" + e.mean_strength.toFixed(4) + "</span></div>",
+                "<div style='font-size:11px;color:#9ca3af;'>" + (isZh ? "单边最大强度：" : "Max strength per edge:") + "<span style='color:#e5e7eb;'>" + e.max_strength.toFixed(4) + "</span></div>"
+              ].join("");
+            }
+            return "";
+          }
+        },
+        series: [
+          {
+            type: "graph",
+            layout: "none",
+            coordinateSystem: null,
+            // 与 D1 的 grid 保持一致的左右边距，确保方块与数字对齐
+            left: 36,
+            right: 20,
+            // 调整上下留白：减小上下 padding，让灰色方块更多占满竖向空间
+            top: -5,
+            bottom: 10,
+            roam: false,
+            animationDurationUpdate: 600,
+            animationEasingUpdate: "cubicOut",
+            focusNodeAdjacency: true,
+            draggable: false,
+            edgeSymbol: ["none", "none"],
+            edgeSymbolSize: 6,
+            data: nodes,
+            links,
+            lineStyle: {
+              color: "#d1d5db",
+              curveness: 0.1
+            },
+            label: {
+              position: "right"
+            }
+          }
+        ]
+      };
+    }
+
+    (function init() {
+      const streamChartDom = document.getElementById("streamChart");
+      const gradientChartDom = document.getElementById("gradientChart");
+      const subsetSelect = document.getElementById("subsetSelect");
+      const gradientSummaryText = document.getElementById("gradientSummaryText");
+      const streamSummaryText = document.getElementById("streamSummaryText");
+
+      if (
+        !streamChartDom ||
+        !gradientChartDom ||
+        !subsetSelect ||
+        !gradientSummaryText ||
+        !streamSummaryText
+      ) {
+        console.error("页面元素缺失，无法初始化图表。");
+        return;
+      }
+
+      const streamChart = echarts.init(streamChartDom, null, { renderer: "canvas" });
+      const gradientChart = echarts.init(gradientChartDom, null, { renderer: "canvas" });
+
+      let streamDataCache = null;
+      let gradientDataCache = null;
+
+      // 根据当前图表宽度更新 D1→D2 的像素对齐缩放比例
+      function updateAlignmentScale() {
+        const sw = streamChart.getWidth();
+        const gw = gradientChart.getWidth();
+        if (sw > 0 && gw > 0) {
+          gradientAlignScale = gw / sw;
+        } else {
+          gradientAlignScale = 1;
+        }
+      }
+
+      // 根据 D1 的 x 轴，将每一层对应的像素 x 坐标缓存到 layerPixelPositions
+      function updateLayerPixelPositions() {
+        if (!streamDataCache) return;
+        const positions = {};
+        for (let i = 0; i < streamDataCache.length; i++) {
+          const layer = streamDataCache[i].layer;
+          const px = streamChart.convertToPixel({ xAxisIndex: 0 }, i);
+          const x = Array.isArray(px) ? px[0] : px;
+          if (typeof x === "number" && isFinite(x)) {
+            positions[layer] = x;
+          }
+        }
+        layerPixelPositions = positions;
+      }
+
+      function renderStream() {
+        if (!streamDataCache) return;
+        const subset = subsetSelect.value || "all";
+        const option = buildStreamgraphOption(streamDataCache, subset);
+        streamChart.clear();
+        streamChart.setOption(option, true);
+
+        // 每次 D1 渲染后，更新像素对齐信息
+        updateAlignmentScale();
+        updateLayerPixelPositions();
+
+        // 估计“关键层”：成功越权 mean 差值（success.mean - fail.mean）最大的层（仅用于内部联动高亮）
+        let maxDelta = -Infinity;
+        let pivotLayer = null;
+        for (const d of streamDataCache) {
+          const delta = (d.success?.mean ?? 0) - (d.fail?.mean ?? 0);
+          if (delta > maxDelta) {
+            maxDelta = delta;
+            pivotLayer = d.layer;
+          }
+        }
+        pivotLayerGlobal = pivotLayer;
+        // 按需求移除“层数 / 语义偏移最显著层”文本显示，保留右侧状态栏占位
+        streamSummaryText.textContent = "";
+      }
+
+      function renderGradient() {
+        if (!gradientDataCache) return;
+        // 确保在当前窗口尺寸下有正确的对齐缩放和像素位置
+        updateAlignmentScale();
+        updateLayerPixelPositions();
+        // 显示所有梯度依赖边（已在构建阶段移除同层依赖）
+        const ratio = 1;
+        const option = buildGradientGraphOption(
+          gradientDataCache,
+          ratio
+        );
+        gradientChart.clear();
+        gradientChart.setOption(option, true);
+
+        // 调试：输出边的数量和样本
+        const nodeIds = option.series[0].data.map(n => n.id);
+        const linkSources = option.series[0].links.map(l => l.source);
+        const linkTargets = option.series[0].links.map(l => l.target);
+        const invalidSources = linkSources.filter(s => !nodeIds.includes(s));
+        const invalidTargets = linkTargets.filter(t => !nodeIds.includes(t));
+        console.log("D2 渲染调试:", {
+          nodes: option.series[0].data.length,
+          links: option.series[0].links.length,
+          nodeIds: nodeIds.slice(0, 5),
+          sampleLinks: option.series[0].links.slice(0, 3),
+          invalidSources: invalidSources.slice(0, 5),
+          invalidTargets: invalidTargets.slice(0, 5),
+          seriesConfig: {
+            left: option.series[0].left,
+            right: option.series[0].right,
+            top: option.series[0].top,
+            bottom: option.series[0].bottom
+          }
+        });
+
+        const totalEdges = gradientDataCache.edges.length;
+        const visibleCount = option.series[0].links.length;
+        const layerCount = gradientDataCache.layers.length;
+        // 按需求移除“当前显示层数 / 可视边数 / 聚合边总数”文本显示
+        gradientSummaryText.textContent = "";
+
+        // 如果存在全局关键层（语义偏移最显著层），在 D2 中做初始高亮
+        if (pivotLayerGlobal != null) {
+          highlightGradientNode(pivotLayerGlobal);
+        }
+      }
+
+      // 辅助函数：在 D2 中高亮指定层的节点
+      function highlightGradientNode(layer) {
+        if (
+          !gradientDataCache ||
+          !gradientNodeIndexByLayer ||
+          gradientNodeIndexByLayer[layer] == null
+        ) {
+          return;
+        }
+        const nodeIndex = gradientNodeIndexByLayer[layer];
+        // 先取消高亮，再对目标节点高亮
+        gradientChart.dispatchAction({
+          type: "downplay",
+          seriesIndex: 0
+        });
+        gradientChart.dispatchAction({
+          type: "highlight",
+          seriesIndex: 0,
+          dataIndex: nodeIndex
+        });
+      }
+
+      // 辅助函数：在 D1 中聚焦到指定层（展示 tooltip + 轴指示线）
+      function focusStreamLayer(layer) {
+        if (!streamDataCache) return;
+        const idx = streamDataCache.findIndex((d) => d.layer === layer);
+        if (idx < 0) return;
+        // 使用 showTip 联动轴指示线和 tooltip
+        streamChart.dispatchAction({
+          type: "showTip",
+          seriesIndex: 1,
+          dataIndex: idx
+        });
+      }
+
+      // 绑定交互
+      subsetSelect.addEventListener("change", () => {
+        renderStream();
+      });
+
+      // 加载 D1 流图数据并首次渲染
+      // 使用 Promise.all 确保 D1 和 D2 数据都加载完成后，按顺序渲染
+      // 这样 D2 可以使用 D1 的像素位置信息来对齐方块和数字
+      Promise.all([loadStreamgraphData(), loadGradientDependencies()])
+        .then(([streamData, gradientData]) => {
+          // 先渲染 D1
+          streamDataCache = streamData;
+          const streamLayerMin = streamData[0]?.layer ?? 0;
+          const streamLayerMax = streamData[streamData.length - 1]?.layer ?? 0;
+          streamSummaryText.textContent =
+            "已加载层索引范围：Layer " +
+            streamLayerMin +
+            "–" +
+            streamLayerMax +
+            " · 每层统计成功 / 失败越权实例各 " +
+            (streamData[0]?.success?.count ?? "?") +
+            " 条";
+          renderStream();
+
+          // D1 渲染完成后，再渲染 D2（此时 layerPixelPositions 已经准备好）
+          gradientDataCache = gradientData;
+          const gradientLayerMin = Math.min(...gradientData.layers);
+          const gradientLayerMax = Math.max(...gradientData.layers);
+          gradientSummaryText.textContent =
+            "已加载层索引范围：Layer " +
+            gradientLayerMin +
+            "–" +
+            gradientLayerMax +
+            " · 原始 neuron-pair 关系数：" +
+            gradientData.totalPairs +
+            " · 聚合后边数：" +
+            gradientData.edges.length;
+          renderGradient();
+        })
+        .catch((err) => {
+          console.error(err);
+          if (!streamDataCache) {
+            streamSummaryText.textContent =
+              "Failed to load/parse stream graph data: " + err.message;
+          }
+          if (!gradientDataCache) {
+            gradientSummaryText.textContent =
+              "Failed to load/parse gradient dependency data: " + err.message;
+          }
+        });
+
+      window.addEventListener("resize", () => {
+        streamChart.resize();
+        gradientChart.resize();
+        // 窗口缩放时，重新计算像素对齐并刷新 D2
+        updateAlignmentScale();
+        updateLayerPixelPositions();
+        renderGradient();
+      });
+
+      // D1 → D2 联动：鼠标悬停在流图上时高亮对应层的梯度节点
+      streamChart.on("mouseover", (params) => {
+        if (
+          !params ||
+          typeof params.dataIndex !== "number" ||
+          !Array.isArray(streamDataCache)
+        ) {
+          return;
+        }
+        const d = streamDataCache[params.dataIndex];
+        if (!d) return;
+        highlightGradientNode(d.layer);
+      });
+
+      // D2 → D1 联动：鼠标悬停在某一层节点时，在 D1 中聚焦对应层
+      gradientChart.on("mouseover", (params) => {
+        if (!params || params.dataType !== "node" || !params.data) return;
+        const L = Number(params.data.id);
+        if (Number.isNaN(L)) return;
+        focusStreamLayer(L);
+      });
+
+      // Language translations
+      let currentLangD = 'en';
+      const translationsD = {
+        en: {
+          layerView: 'Layer View D',
+          subset: 'Subset',
+          allInstances: 'All instances (success + failure)',
+          successOnly: 'Successful jailbreak cases only',
+          failOnly: 'Failed jailbreak cases only',
+          loadingStream: 'Loading stream graph data…',
+          loadingGradient: 'Loading gradient dependency data…',
+          loadedRange: 'Loaded layer index range: Layer ',
+          countSuccess: ' · Each layer counts success / fail jailbreak instances: ',
+          layer: 'Layer',
+          successfulJailbreak: 'Successful jailbreak (mean±std)',
+          failedJailbreak: 'Failed jailbreak (mean±std)',
+          boundary: 'Boundary: mean±std',
+          fillRange: 'Fill: ±std range',
+          successfulCases: 'Successful jailbreak cases',
+          failedCases: 'Failed jailbreak cases',
+          mean: 'mean',
+          std: 'std',
+          q1q3: 'q1 / q3',
+          decisionBoundary: 'Dashed line y=0 denotes the safe / harmful decision boundary',
+          safeHarmful: 'Safe / harmful decision boundary',
+          inGradient: 'In-gradient',
+          outGradient: 'Out-gradient',
+          totalFlow: 'Total flow',
+          aggregationStrength: 'Aggregation strength (sum)',
+          meanStrength: 'Mean strength (mean)',
+          maxStrength: 'Max strength per edge'
+        },
+        zh: {
+          layerView: '层级视图 D',
+          subset: '子集',
+          allInstances: '所有实例（成功+失败）',
+          successOnly: '仅成功越狱案例',
+          failOnly: '仅失败越狱案例',
+          loadingStream: '正在加载流图数据…',
+          loadingGradient: '正在加载梯度依赖数据…',
+          loadedRange: '已加载层索引范围：Layer ',
+          countSuccess: ' · 每层统计成功/失败越狱实例各 ',
+          layer: '层',
+          successfulJailbreak: '成功越狱（均值±标准差）',
+          failedJailbreak: '失败越狱（均值±标准差）',
+          boundary: '边界：均值±标准差',
+          fillRange: '填充：±标准差范围',
+          successfulCases: '成功越狱案例',
+          failedCases: '失败越狱案例',
+          mean: '均值',
+          std: '标准差',
+          q1q3: '四分位 Q1/Q3',
+          decisionBoundary: '虚线 y=0 表示安全/有害决策边界',
+          safeHarmful: '安全/有害决策边界',
+          inGradient: '入向梯度',
+          outGradient: '出向梯度',
+          totalFlow: '总流量',
+          aggregationStrength: '聚合强度（总和）',
+          meanStrength: '平均强度（均值）',
+          maxStrength: '单边最大强度'
+        }
+      };
+
+      function updatePanelDLanguage(lang) {
+        const t = translationsD[lang];
+        if (!t) return;
+        currentLangD = lang;
+        
+        // Update panel title
+        document.querySelector('.panel-title').textContent = t.layerView;
+
+        // Update subset label
+        const subsetSpan = document.querySelector('.control-group span');
+        if (subsetSpan) subsetSpan.textContent = t.subset;
+
+        // Update select options
+        const subsetSelect = document.getElementById('subsetSelect');
+        if (subsetSelect) {
+          const options = subsetSelect.querySelectorAll('option');
+          if (options[0]) options[0].textContent = t.allInstances;
+          if (options[1]) options[1].textContent = t.successOnly;
+          if (options[2]) options[2].textContent = t.failOnly;
+        }
+
+        // Update legend
+        const legendItems = document.querySelectorAll('.legend-item span');
+        if (legendItems[0]) legendItems[0].textContent = t.successfulJailbreak;
+        if (legendItems[1]) legendItems[1].textContent = t.failedJailbreak;
+        if (legendItems[2]) legendItems[2].textContent = t.boundary;
+        if (legendItems[3]) legendItems[3].textContent = t.fillRange;
+
+        // Re-render charts with new language
+        if (streamDataCache) renderStream();
+        if (gradientDataCache) renderGradient();
+      }
+
+      // Listen for language change
+      window.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'languageChange') {
+          updatePanelDLanguage(event.data.lang);
+        }
+      });
+
+      const savedLangD = localStorage.getItem('language') || 'en';
+      // Ensure default is English
+      if (!localStorage.getItem('language')) {
+          localStorage.setItem('language', 'en');
+      }
+      currentLangD = savedLangD;
+      setTimeout(() => updatePanelDLanguage(savedLangD), 500);
+    })();
+  </script>
+</body>
+</html>
+

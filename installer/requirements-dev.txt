@@ -1,0 +1,8 @@
+# 用于「可选」本地开发环境：需系统已安装 Python 3.10+（与打包环境一致更佳）
+fastapi==0.109.0
+uvicorn==0.27.0
+numpy==1.26.3
+pydantic==2.5.3
+python-multipart==0.0.6
+aiofiles==23.2.1
+pywebview>=4.4

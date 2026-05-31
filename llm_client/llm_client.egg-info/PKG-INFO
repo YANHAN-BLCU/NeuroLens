@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: llm_client
+Version: 1.0.0
+Summary: 多厂商大语言模型API调用系统，用于LLM安全评测
+Author: Neurolens
+Requires-Python: >=3.10
+Requires-Dist: requests>=2.28.0
+Dynamic: author
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
