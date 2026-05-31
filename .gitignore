@@ -1,3 +1,5 @@
 dist/
 
 installer/Output/
+
+visualization/backend/Desensization-dashboard/models/
